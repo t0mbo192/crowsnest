@@ -1,0 +1,24 @@
+# Capture files -- contain real IP addresses and browsing history. Never commit.
+*.pcapng
+*.pcap
+*.cap
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+
+# Unrelated local script that happened to be in this folder
+gdid_regen.ps1
+
+# OS cruft
+.DS_Store
+Thumbs.db

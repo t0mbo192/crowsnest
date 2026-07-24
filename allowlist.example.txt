@@ -1,0 +1,15 @@
+# Allowlist for analyze_capture.py
+# One entry per line. '#' starts a comment. Entries can be:
+#   root domains      github.com          (matches api.github.com, www.github.com, ...)
+#   specific hosts    login.example.com
+#   wildcards         *.corp.example.com  (same effect as corp.example.com)
+#   literal IPs       140.82.113.4
+# Any host/endpoint that does NOT match an entry gets flagged.
+
+tailscale.com
+google.com
+1e100.net          # Google's server-hostname domain
+gstatic.com
+apple.com
+microsoft.com
+windowsupdate.com
