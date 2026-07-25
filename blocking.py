@@ -184,15 +184,106 @@ def dns_servers() -> list[str]:
     return found
 
 
+def _hex_to_address(field: str) -> str:
+    """Decode an address from /proc/net/tcp, which stores it little-endian hex."""
+    try:
+        raw = bytes.fromhex(field)
+    except ValueError:
+        return ""
+    if len(raw) == 4:
+        return str(ipaddress.IPv4Address(bytes(reversed(raw))))
+    if len(raw) == 16:
+        words = [raw[i:i + 4] for i in range(0, 16, 4)]
+        return str(ipaddress.IPv6Address(b"".join(bytes(reversed(w)) for w in words)))
+    return ""
+
+
+def _environ_of(pid: int) -> dict[str, str]:
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as f:
+            raw = f.read()
+    except OSError:
+        return {}
+    found = {}
+    for entry in raw.split(b"\0"):
+        name, _, value = entry.decode("utf-8", "replace").partition("=")
+        if name:
+            found[name] = value
+    return found
+
+
+def _parent_of(pid: int) -> int | None:
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8") as f:
+            fields = f.read().rpartition(")")[2].split()
+        return int(fields[1])           # ppid, after state
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _peers_from_established_ssh() -> list[str]:
+    """Every address with an established connection to the SSH port."""
+    found = []
+    for proc_file in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(proc_file, encoding="utf-8") as f:
+                lines = f.readlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            parts = line.split()
+            if len(parts) < 4 or parts[3] != "01":       # 01 = ESTABLISHED
+                continue
+            local, _, local_port = parts[1].partition(":")
+            if int(local_port, 16) != 22:
+                continue
+            remote = _hex_to_address(parts[2].partition(":")[0])
+            if remote and remote not in found:
+                found.append(remote)
+    return found
+
+
 def ssh_peer() -> str | None:
-    """The address this SSH session came from, if we are inside one."""
+    """The address of the SSH session we are running inside, if any."""
+    peers = ssh_peers()
+    return peers[0] if peers else None
+
+
+def ssh_peers() -> list[str]:
+    """Addresses connected to this machine over SSH.
+
+    SSH_CONNECTION is checked first, but sudo clears the environment by default
+    and blocking always runs under sudo -- so that variable is missing exactly
+    when this matters most, and the guardrail against locking yourself out of a
+    headless box would never fire.
+
+    Two fallbacks cover that. Walking up the process tree finds the shell that
+    sshd started, whose environment still holds SSH_CONNECTION, which pins down
+    this session precisely whatever port sshd runs on. Established connections
+    to the SSH port are then added, so other people's sessions are protected
+    too -- for a guardrail, erring wide is the right way to err.
+    """
+    peers: list[str] = []
+
+    def note(value: str) -> None:
+        address = value.split()[0] if value else ""
+        if address and address not in peers:
+            peers.append(address)
+
     for name in ("SSH_CONNECTION", "SSH_CLIENT"):
-        value = os.environ.get(name)
-        if value:
-            parts = value.split()
-            if parts:
-                return parts[0]
-    return None
+        note(os.environ.get(name, ""))
+
+    pid, depth = os.getpid(), 0
+    while pid and pid > 1 and depth < 12:
+        environ = _environ_of(pid)
+        for name in ("SSH_CONNECTION", "SSH_CLIENT"):
+            note(environ.get(name, ""))
+        pid = _parent_of(pid)
+        depth += 1
+
+    for address in _peers_from_established_ssh():
+        note(address)
+    return peers
 
 
 def local_addresses() -> list[str]:
@@ -228,10 +319,9 @@ def protected_addresses() -> dict[str, str]:
     for address in dns_servers():
         protected.setdefault(address, "a DNS server this machine uses "
                                       "- blocking it breaks name resolution")
-    peer = ssh_peer()
-    if peer:
-        protected.setdefault(peer, "the peer of your current SSH session "
-                                   "- blocking it locks you out")
+    for peer in ssh_peers():
+        protected.setdefault(peer, "connected to this machine over SSH "
+                                   "- blocking it locks that session out")
     return protected
 
 

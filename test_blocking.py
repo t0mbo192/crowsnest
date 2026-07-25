@@ -14,6 +14,7 @@ That needs a Linux box -- run `crowsnest block <host> --dry-run` there first.
 
 from __future__ import annotations
 
+import io
 import subprocess
 import unittest
 from unittest import mock
@@ -131,9 +132,49 @@ class TestGuardrails(unittest.TestCase):
     def test_ssh_peer_is_protected(self):
         with mock.patch.object(blocking, "default_gateways", return_value=[]), \
              mock.patch.object(blocking, "dns_servers", return_value=[]), \
-             mock.patch.object(blocking, "ssh_peer", return_value="10.1.2.3"),              mock.patch.object(blocking, "local_addresses", return_value=[]):
+             mock.patch.object(blocking, "ssh_peers", return_value=["10.1.2.3"]), \
+             mock.patch.object(blocking, "local_addresses", return_value=[]):
             problems = blocking.check_targets(["10.1.2.3"])
-        self.assertIn("locks you out", problems["10.1.2.3"])
+        self.assertIn("locks that session out", problems["10.1.2.3"])
+
+    def test_ssh_peer_found_when_sudo_clears_the_environment(self):
+        """The bug that mattered most: sudo wipes SSH_CONNECTION.
+
+        Blocking only ever runs under sudo, because nft needs root, so relying
+        on that variable meant the lock-yourself-out guardrail never fired in
+        practice. The peer must still be found with the environment empty.
+        """
+        established = ("  sl  local_address rem_address   st\n"
+                       "   0: 3200A8C0:0016 7800A8C0:E1D1 01\n")
+
+        def fake_open(path, *args, **kwargs):
+            if path == "/proc/net/tcp":
+                return io.StringIO(established)
+            raise OSError("not available in this test")
+
+        with mock.patch.dict("os.environ", {}, clear=True), \
+             mock.patch.object(blocking, "_environ_of", return_value={}), \
+             mock.patch.object(blocking, "_parent_of", return_value=None), \
+             mock.patch("builtins.open", side_effect=fake_open):
+            peers = blocking.ssh_peers()
+        # 3200A8C0 = 192.168.0.50 port 22; 7800A8C0 = 192.168.0.120
+        self.assertEqual(peers, ["192.168.0.120"])
+
+    def test_ssh_peer_found_via_parent_process_environment(self):
+        """Under sudo our own environ is bare, but the shell above it is not."""
+        with mock.patch.dict("os.environ", {}, clear=True), \
+             mock.patch.object(blocking, "_environ_of",
+                               return_value={"SSH_CONNECTION":
+                                             "192.168.0.120 5 192.168.0.50 22"}), \
+             mock.patch.object(blocking, "_parent_of", return_value=None), \
+             mock.patch.object(blocking, "_peers_from_established_ssh",
+                               return_value=[]):
+            self.assertEqual(blocking.ssh_peers(), ["192.168.0.120"])
+
+    def test_proc_net_tcp_address_decoding(self):
+        # Stored little-endian per 4-byte word, which is easy to get backwards.
+        self.assertEqual(blocking._hex_to_address("3200A8C0"), "192.168.0.50")
+        self.assertEqual(blocking._hex_to_address("0100007F"), "127.0.0.1")
 
     def test_own_address_is_protected(self):
         # Found on a real Pi: the machine's own LAN address was allowed through.
