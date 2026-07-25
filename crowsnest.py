@@ -29,6 +29,7 @@ import ipaddress
 import json
 import os
 import queue
+import re
 import signal
 import sys
 import threading
@@ -82,11 +83,19 @@ def term_width(default: int = 100) -> int:
         return int(os.environ.get("COLUMNS", default))
 
 
+def term_height(default: int = 30) -> int:
+    try:
+        return os.get_terminal_size().lines
+    except OSError:
+        return int(os.environ.get("LINES", default))
+
+
 class Style:
     """ANSI colours that vanish when colour is off."""
 
     DIM, BOLD = "2", "1"
     OUT, IN, GREY = "38;5;75", "38;5;215", "38;5;245"
+    FRAME = "38;5;240"
 
     def __init__(self, enabled: bool):
         self.on = enabled
@@ -102,6 +111,125 @@ class Glyphs:
         self.out = "↑" if unicode_safe else "^"
         self.inb = "↓" if unicode_safe else "v"
         self.sep = "  ·  " if unicode_safe else "  |  "
+        # Box drawing, with an ASCII fallback so a plain console still frames.
+        if unicode_safe:
+            self.tl, self.tr, self.bl, self.br = "╭", "╮", "╰", "╯"
+            self.h, self.v = "─", "│"
+        else:
+            self.tl, self.tr, self.bl, self.br = "+", "+", "+", "+"
+            self.h, self.v = "-", "|"
+
+
+# A lookout's basket atop a mast, above the waterline. Deliberately ASCII so it
+# renders the same on a Pi console, an SSH session and a Windows terminal.
+LOGO = [
+    "   ___   ",
+    "  |o..|  ",
+    "  |___|  ",
+    " ~~~|~~~ ",
+]
+
+
+# -------------------------------------------------------------------- panels
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def visible_len(text: str) -> int:
+    """Width on screen, ignoring colour codes.
+
+    Padding on len() would count the escape sequences, which take no space, and
+    every framed line would end up a different length.
+    """
+    return len(ANSI_RE.sub("", text))
+
+
+def box(title: str, body: list[str], width: int, glyphs: Glyphs,
+        style: Style) -> list[str]:
+    """Frame some lines, with the title set into the top edge."""
+    inner = max(10, width - 2)
+    label = f" {title} " if title else ""
+    fill = max(0, inner - len(label) - 1)
+    top = f"{glyphs.tl}{glyphs.h}{label}{glyphs.h * fill}{glyphs.tr}"
+    edge = style(glyphs.v, Style.FRAME)
+    out = [style(top, Style.FRAME)]
+    for line in body:
+        pad = inner - visible_len(line)
+        if pad < 0:                       # only reachable if a caller oversized
+            line, pad = ANSI_RE.sub("", line)[:inner], 0
+        out.append(edge + line + " " * pad + edge)
+    out.append(style(f"{glyphs.bl}{glyphs.h * inner}{glyphs.br}", Style.FRAME))
+    return out
+
+
+def panel_rows(rows: list[dict], width: int, limit: int, style: Style,
+               inbound: bool) -> list[str]:
+    """The body of a direction panel: host, what it is, volume, rate."""
+    inner = max(30, width - 4)
+    rate_w, data_w = 10, 9
+    flexible = inner - rate_w - data_w - 4
+    site_w = max(14, int(flexible * 0.52))
+    desc_w = max(10, flexible - site_w)
+
+    body = []
+    for r in rows[:limit]:
+        rate = r.get("rate", 0)
+        rate_text = f"{core.human_bytes(int(rate))}/s" if rate >= 1 else ""
+        line = (f" {r['site'][:site_w]:<{site_w}} "
+                f"{r['description'][:desc_w]:<{desc_w}} "
+                f"{core.human_bytes(r['bytes']):>{data_w}} "
+                f"{rate_text:>{rate_w}}")
+        body.append(style(line, Style.IN) if inbound else line)
+    if not rows:
+        body.append(style("  nothing yet", Style.DIM))
+    hidden = len(rows) - min(len(rows), limit)
+    if hidden > 0:
+        body.append(style(f"  ... {hidden} more", Style.DIM))
+    return body
+
+
+def render_dashboard(rows: list[dict], meta: dict, glyphs: Glyphs, style: Style,
+                     interface: str, elapsed: float) -> list[str]:
+    """The full-screen view: a header with the logo, then one panel each way."""
+    width = min(term_width(), 120)
+    height = term_height()
+
+    mins, secs = divmod(int(elapsed), 60)
+    hours, mins = divmod(mins, 60)
+    facts = [
+        f"{interface}{glyphs.sep}{hours:02d}:{mins:02d}:{secs:02d}",
+        f"{meta['packets']:,} packets{glyphs.sep}"
+        f"{core.human_bytes(meta.get('bytes', 0))}",
+        f"this machine {meta.get('my_ips') or '?'}",
+    ]
+    header = []
+    for i, art in enumerate(LOGO):
+        right = facts[i - 1] if 0 < i <= len(facts) else ""
+        if i == 0:
+            right = style("CROWSNEST", Style.BOLD) + style(
+                "   network lookout", Style.DIM)
+        header.append(f" {art}  {right}")
+
+    outbound = [r for r in rows if r["direction"].startswith("out")]
+    inbound = [r for r in rows if not r["direction"].startswith("out")]
+
+    # Share the rows left over after the frames between the two panels.
+    spare = max(4, height - len(header) - 10)
+    out_limit = max(2, min(len(outbound), spare - min(len(inbound), 4)))
+    in_limit = max(2, spare - out_limit)
+
+    frame = header + [""]
+    frame += box(f"OUTBOUND   {len(outbound)} hosts",
+                 panel_rows(outbound, width, out_limit, style, inbound=False),
+                 width, glyphs, style)
+    frame += box(f"INBOUND   {len(inbound)} hosts",
+                 panel_rows(inbound, width, in_limit, style, inbound=True),
+                 width, glyphs, style)
+    n_out, n_in = len(outbound), len(inbound)
+    frame.append(style(f"  {n_out + n_in} connections "
+                       f"({n_out} out, {n_in} in){glyphs.sep}"
+                       f"{core.human_bytes(meta.get('bytes', 0))} total"
+                       f"{glyphs.sep}Ctrl-C to stop", Style.DIM))
+    return frame
 
 
 # -------------------------------------------------------------------- table
@@ -226,22 +354,8 @@ def cmd_live(args) -> int:
                 print(style(line, Style.IN) if not outbound else line, flush=True)
             continue
 
-        shown = rows if args.top <= 0 else rows[: args.top]
-        mins, secs = divmod(int(now - started), 60)
-        hours, mins = divmod(mins, 60)
-        frame = [
-            style(f"crowsnest live{glyphs.sep}{args.interface}{glyphs.sep}"
-                  f"{hours:02d}:{mins:02d}:{secs:02d}{glyphs.sep}"
-                  f"{meta['packets']:,} packets{glyphs.sep}"
-                  f"this machine {meta['my_ips'] or '?'}", Style.BOLD),
-            "",
-        ]
-        frame += render_table(shown, term_width(), glyphs, style, show_rate=True)
-        if not shown:
-            frame.append(style("  (waiting for traffic)", Style.DIM))
-        frame += ["", style(summary_line(rows, meta, glyphs, len(rows) - len(shown)),
-                            Style.DIM),
-                  style("  Ctrl-C to stop", Style.DIM)]
+        frame = render_dashboard(rows, meta, glyphs, style, args.interface,
+                                 now - started)
         sys.stdout.write((f"{ESC}H{ESC}2J" if style.on else "\n\n") +
                          "\n".join(frame) + "\n")
         sys.stdout.flush()

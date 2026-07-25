@@ -156,6 +156,36 @@ case ":${PATH}:" in
     *)                ON_PATH=0 ;;
 esac
 
+# --- desktop launcher --------------------------------------------------------
+# On a machine with a screen -- a Pi wired to a monitor, say -- a menu entry
+# that opens the dashboard in its own terminal window is the natural way to run
+# this. Skipped entirely on a headless box, where it would just be clutter.
+DESKTOP_HOME="${SUDO_USER:+$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)}"
+DESKTOP_HOME="${DESKTOP_HOME:-$HOME}"
+DESKTOP_DIR="${DESKTOP_HOME}/.local/share/applications"
+
+if [ "$PLATFORM" = "Linux" ] && [ -d "${DESKTOP_HOME}/.local/share" ]; then
+    # Watch whichever interface actually carries the default route.
+    IFACE="$(ip route show default 2>/dev/null | awk '/dev/ {for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')"
+    IFACE="${IFACE:-eth0}"
+    mkdir -p "$DESKTOP_DIR"
+    cat > "${DESKTOP_DIR}/crowsnest.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=crowsnest
+Comment=Watch which hosts this machine talks to, and what talks to it
+Exec=sudo ${TARGET} live -i ${IFACE} --dashboard
+Icon=utilities-system-monitor
+Terminal=true
+Categories=Network;Monitor;System;
+EOF
+    chmod +x "${DESKTOP_DIR}/crowsnest.desktop" 2>/dev/null || true
+    if [ -n "${SUDO_USER:-}" ]; then
+        chown "$SUDO_USER" "${DESKTOP_DIR}/crowsnest.desktop" 2>/dev/null || true
+    fi
+    say "menu entry" "${DESKTOP_DIR}/crowsnest.desktop  (watches ${IFACE})"
+fi
+
 VERSION="$("$PYTHON" -c "import sys; sys.path.insert(0,'$REPO_DIR'); from crowsnest_version import __version__; print(__version__)")"
 
 printf '\nDone -- crowsnest %s is installed.\n\n' "$VERSION"
