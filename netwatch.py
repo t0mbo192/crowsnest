@@ -9,6 +9,7 @@ each host is labelled with what it actually is rather than left as an address.
     netwatch live -i eth0                  report each host once, as it appears
     netwatch read capture.pcapng           analyse a saved capture
     netwatch interfaces                    what can I capture on?
+    netwatch block 203.0.113.5             stop a host reaching this machine
     netwatch asn --fetch                   get the database that names owners
 
 Direction comes from the TCP handshake: whoever sends the opening SYN started
@@ -399,6 +400,157 @@ def cmd_asn(args) -> int:
     return 0
 
 
+# -------------------------------------------------------------------- blocking
+def _blocking_or_exit() -> None:
+    import blocking
+    if not blocking.nft_available():
+        raise RuntimeError(blocking.unsupported_reason())
+
+
+def _confirm(prompt: str, assume_yes: bool) -> bool:
+    if assume_yes:
+        return True
+    if not sys.stdin.isatty():
+        print("not a terminal, so nothing was changed. Pass --yes to proceed "
+              "without asking.", file=sys.stderr)
+        return False
+    try:
+        return input(f"{prompt} [y/N] ").strip().lower() in ("y", "yes")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+
+
+def cmd_block(args) -> int:
+    import blocking
+    _blocking_or_exit()
+    style = Style(enable_ansi() and not args.no_color)
+
+    addresses: list[str] = []
+    for target in args.targets:
+        found = blocking.resolve_target(target)
+        if len(found) > 1 or found[0] != target:
+            print(f"  {target} -> {', '.join(found)}")
+        addresses += [a for a in found if a not in addresses]
+
+    # Refuse the addresses whose blocking tends to break the machine.
+    problems = blocking.check_targets(addresses)
+    if problems and not args.force:
+        print(style("\nRefusing to block:", Style.BOLD), file=sys.stderr)
+        for address, why in problems.items():
+            print(f"  {address}  -- {why}", file=sys.stderr)
+        print("\nPass --force if you are certain.", file=sys.stderr)
+        addresses = [a for a in addresses if a not in problems]
+        if not addresses:
+            return 1
+
+    already = {e["address"] for e in blocking.list_blocks()}
+    fresh = [a for a in addresses if a not in already]
+    for address in addresses:
+        if address in already:
+            print(f"  {address} is already blocked")
+    if not fresh:
+        return 0
+
+    print(style("\nThis will run:", Style.BOLD))
+    for line in blocking.describe_commands(fresh):
+        print(f"  {line}")
+    print(style("\nInbound traffic from these hosts will be dropped. Existing "
+                "firewall rules are untouched;\nnetwatch only writes to its own "
+                f"'{blocking.TABLE}' table.", Style.DIM))
+    if not args.persist:
+        print(style("This lasts until reboot. Add --persist to record it for "
+                    "`netwatch blocks --restore`.", Style.DIM))
+
+    if args.dry_run:
+        print("\ndry run: nothing was changed.")
+        return 0
+    if not _confirm("\nApply?", args.yes):
+        print("nothing was changed.")
+        return 1
+
+    added = blocking.block(fresh)
+    for address in added:
+        print(style(f"  blocked {address}", Style.IN))
+    if args.persist and added:
+        blocking.save_record(added)
+        print(f"\nrecorded in {blocking.RECORD_PATH}")
+        print(blocking.restore_hint())
+    return 0
+
+
+def cmd_unblock(args) -> int:
+    import blocking
+    _blocking_or_exit()
+
+    if args.all:
+        entries = blocking.list_blocks()
+        if not entries:
+            print("nothing is blocked.")
+            return 0
+        print(f"This will remove all {len(entries)} block(s) and drop "
+              f"netwatch's '{blocking.TABLE}' table.")
+        if not _confirm("Remove them all?", args.yes):
+            print("nothing was changed.")
+            return 1
+        count = blocking.unblock_all()
+        blocking.forget_record(None)
+        print(f"removed {count} block(s).")
+        return 0
+
+    addresses: list[str] = []
+    for target in args.targets:
+        addresses += [a for a in blocking.resolve_target(target)
+                      if a not in addresses]
+    removed = blocking.unblock(addresses)
+    if not removed:
+        print("none of those were blocked.")
+        return 0
+    blocking.forget_record(removed)
+    for address in removed:
+        print(f"  unblocked {address}")
+    return 0
+
+
+def cmd_blocks(args) -> int:
+    import blocking
+    _blocking_or_exit()
+
+    if args.restore:
+        recorded = blocking.load_record()
+        if not recorded:
+            print(f"nothing recorded in {blocking.RECORD_PATH}")
+            return 0
+        active = {e["address"] for e in blocking.list_blocks()}
+        missing = [a for a in recorded if a not in active]
+        if not missing:
+            print(f"all {len(recorded)} recorded block(s) are already active.")
+            return 0
+        print("This will reapply:")
+        for line in blocking.describe_commands(missing):
+            print(f"  {line}")
+        if not _confirm("\nApply?", args.yes):
+            print("nothing was changed.")
+            return 1
+        for address in blocking.block(missing):
+            print(f"  blocked {address}")
+        return 0
+
+    entries = blocking.list_blocks()
+    recorded = set(blocking.load_record())
+    if not entries:
+        print("nothing is blocked.")
+        if recorded:
+            print(f"{len(recorded)} recorded but not active -- "
+                  f"`netwatch blocks --restore` reapplies them.")
+        return 0
+    print(f"blocked ({len(entries)}):")
+    for entry in entries:
+        mark = "  (recorded)" if entry["address"] in recorded else ""
+        print(f"  {entry['address']}{mark}")
+    return 0
+
+
 def cmd_update(args) -> int:
     import updater
     result = updater.check(__version__)
@@ -464,6 +616,34 @@ def build_parser() -> argparse.ArgumentParser:
                      help="download the DB-IP ASN Lite database")
     asn.add_argument("ips", nargs="*", help="addresses to look up")
     asn.set_defaults(func=cmd_asn)
+
+    # Blocking writes firewall rules, so every one of these shows the exact
+    # command and asks before changing anything.
+    blk = sub.add_parser("block", help="drop inbound traffic from a host (Linux)")
+    blk.add_argument("targets", nargs="+", metavar="HOST",
+                     help="hostname or address to block")
+    blk.add_argument("--persist", action="store_true",
+                     help="record it so `netwatch blocks --restore` can reapply "
+                          "after a reboot (blocks are session-only otherwise)")
+    blk.add_argument("--dry-run", action="store_true",
+                     help="show what would happen and stop")
+    blk.add_argument("--yes", action="store_true", help="do not ask first")
+    blk.add_argument("--force", action="store_true",
+                     help="allow blocking the gateway, DNS or your SSH peer")
+    blk.add_argument("--no-color", action="store_true", help="disable colour")
+    blk.set_defaults(func=cmd_block)
+
+    unb = sub.add_parser("unblock", help="remove a block")
+    unb.add_argument("targets", nargs="*", metavar="HOST")
+    unb.add_argument("--all", action="store_true", help="remove every block")
+    unb.add_argument("--yes", action="store_true", help="do not ask first")
+    unb.set_defaults(func=cmd_unblock)
+
+    bls = sub.add_parser("blocks", help="list blocks, or reapply recorded ones")
+    bls.add_argument("--restore", action="store_true",
+                     help="reapply blocks recorded with --persist")
+    bls.add_argument("--yes", action="store_true", help="do not ask first")
+    bls.set_defaults(func=cmd_blocks)
 
     upd = sub.add_parser("update", help="check whether a newer netwatch exists")
     upd.set_defaults(func=cmd_update)

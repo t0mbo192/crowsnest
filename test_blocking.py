@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""Tests for the blocking logic.
+
+This code writes firewall rules on Linux, and is developed on Windows where nft
+does not exist, so everything below exercises the decision-making with the
+system call mocked out: which addresses a target expands to, which are refused,
+the exact commands produced, and how nft's output is read back.
+
+What these cannot prove is that nftables behaves as expected on a real machine.
+That needs a Linux box -- run `netwatch block <host> --dry-run` there first.
+
+    python -m unittest test_blocking -v
+"""
+
+from __future__ import annotations
+
+import subprocess
+import unittest
+from unittest import mock
+
+import blocking
+
+
+class FakeRunner:
+    """Stands in for subprocess.run, recording calls and replaying output."""
+
+    def __init__(self, stdout: str = "", returncode: int = 0, stderr: str = ""):
+        self.calls: list[list[str]] = []
+        self.stdout = stdout
+        self.returncode = returncode
+        self.stderr = stderr
+
+    def __call__(self, cmd, capture_output=True, text=True):
+        self.calls.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, self.returncode,
+                                          self.stdout, self.stderr)
+
+    @property
+    def nft_args(self) -> list[list[str]]:
+        """Each call with the nft binary path stripped, for easier assertions."""
+        return [call[1:] for call in self.calls]
+
+
+REAL_NFT_OUTPUT = """\
+table inet netwatch { # handle 7
+\tchain input { # handle 1
+\t\ttype filter hook input priority -10; policy accept;
+\t\tip saddr 203.0.113.5 drop # handle 4
+\t\tip saddr 198.51.100.9 drop # handle 5
+\t\tip6 saddr 2001:db8::1 drop # handle 6
+\t}
+}
+"""
+
+
+class TestParseRuleset(unittest.TestCase):
+    def test_reads_addresses_and_handles(self):
+        entries = blocking.parse_ruleset(REAL_NFT_OUTPUT)
+        self.assertEqual(
+            entries,
+            [{"address": "203.0.113.5", "handle": 4},
+             {"address": "198.51.100.9", "handle": 5},
+             {"address": "2001:db8::1", "handle": 6}])
+
+    def test_ipv6_recognised(self):
+        entries = blocking.parse_ruleset(
+            "\t\tip6 saddr 2001:db8::dead:beef drop # handle 12\n")
+        self.assertEqual(entries[0]["address"], "2001:db8::dead:beef")
+        self.assertEqual(entries[0]["handle"], 12)
+
+    def test_ignores_unrelated_rules(self):
+        text = ("\t\tip saddr 10.0.0.1 accept # handle 2\n"      # not a drop
+                "\t\tip daddr 10.0.0.2 drop # handle 3\n"        # daddr, not saddr
+                "\t\tip saddr 10.0.0.3 drop # handle 4\n")       # the only match
+        entries = blocking.parse_ruleset(text)
+        self.assertEqual([e["address"] for e in entries], ["10.0.0.3"])
+
+    def test_empty_output(self):
+        self.assertEqual(blocking.parse_ruleset(""), [])
+
+
+class TestResolveTarget(unittest.TestCase):
+    def test_plain_ipv4_passes_through(self):
+        self.assertEqual(blocking.resolve_target("203.0.113.5"), ["203.0.113.5"])
+
+    def test_plain_ipv6_passes_through(self):
+        self.assertEqual(blocking.resolve_target("2001:db8::1"), ["2001:db8::1"])
+
+    def test_hostname_expands_to_addresses(self):
+        fake = [(2, 1, 6, "", ("203.0.113.5", 0)),
+                (2, 1, 6, "", ("203.0.113.6", 0)),
+                (2, 1, 6, "", ("203.0.113.5", 0))]     # duplicate is dropped
+        with mock.patch("socket.getaddrinfo", return_value=fake):
+            self.assertEqual(blocking.resolve_target("example.test"),
+                             ["203.0.113.5", "203.0.113.6"])
+
+    def test_unresolvable_hostname_explains(self):
+        import socket
+        with mock.patch("socket.getaddrinfo",
+                        side_effect=socket.gaierror("no such host")):
+            with self.assertRaises(blocking.BlockError) as caught:
+                blocking.resolve_target("nope.invalid")
+        self.assertIn("could not resolve", str(caught.exception))
+
+    def test_empty_target_rejected(self):
+        with self.assertRaises(blocking.BlockError):
+            blocking.resolve_target("   ")
+
+
+class TestGuardrails(unittest.TestCase):
+    def test_gateway_is_protected(self):
+        with mock.patch.object(blocking, "default_gateways",
+                               return_value=["192.168.0.1"]), \
+             mock.patch.object(blocking, "dns_servers", return_value=[]), \
+             mock.patch.object(blocking, "ssh_peer", return_value=None):
+            problems = blocking.check_targets(["192.168.0.1", "203.0.113.5"])
+        self.assertIn("192.168.0.1", problems)
+        self.assertIn("gateway", problems["192.168.0.1"])
+        self.assertNotIn("203.0.113.5", problems)
+
+    def test_dns_server_is_protected(self):
+        # The user's Pi-hole is their DNS: blocking it breaks the whole network.
+        with mock.patch.object(blocking, "default_gateways", return_value=[]), \
+             mock.patch.object(blocking, "dns_servers",
+                               return_value=["192.168.0.50"]), \
+             mock.patch.object(blocking, "ssh_peer", return_value=None):
+            problems = blocking.check_targets(["192.168.0.50"])
+        self.assertIn("192.168.0.50", problems)
+        self.assertIn("DNS", problems["192.168.0.50"])
+
+    def test_ssh_peer_is_protected(self):
+        with mock.patch.object(blocking, "default_gateways", return_value=[]), \
+             mock.patch.object(blocking, "dns_servers", return_value=[]), \
+             mock.patch.object(blocking, "ssh_peer", return_value="10.1.2.3"):
+            problems = blocking.check_targets(["10.1.2.3"])
+        self.assertIn("locks you out", problems["10.1.2.3"])
+
+    def test_loopback_is_protected(self):
+        with mock.patch.object(blocking, "protected_addresses", return_value={}):
+            problems = blocking.check_targets(["127.0.0.1", "::1"])
+        self.assertIn("127.0.0.1", problems)
+        self.assertIn("::1", problems)
+
+    def test_ordinary_address_is_allowed(self):
+        with mock.patch.object(blocking, "protected_addresses", return_value={}):
+            self.assertEqual(blocking.check_targets(["203.0.113.5"]), {})
+
+    def test_ssh_peer_read_from_environment(self):
+        with mock.patch.dict("os.environ",
+                             {"SSH_CONNECTION": "10.1.2.3 55character 10.0.0.5 22"},
+                             clear=False):
+            self.assertEqual(blocking.ssh_peer(), "10.1.2.3")
+
+
+class TestCommands(unittest.TestCase):
+    def test_describe_produces_valid_nft_syntax(self):
+        with mock.patch.object(blocking, "nft_path", return_value="/usr/sbin/nft"):
+            lines = blocking.describe_commands(["203.0.113.5", "2001:db8::1"])
+        self.assertIn("add table inet netwatch", lines[0])
+        self.assertIn("add chain inet netwatch input", lines[1])
+        # v4 uses "ip saddr", v6 must use "ip6 saddr" or nft rejects the rule.
+        self.assertIn("ip saddr 203.0.113.5 drop", lines[2])
+        self.assertIn("ip6 saddr 2001:db8::1 drop", lines[3])
+
+    def test_block_creates_table_then_rule(self):
+        runner = FakeRunner(stdout="")
+        with mock.patch.object(blocking, "nft_path", return_value="/usr/sbin/nft"), \
+             mock.patch.object(blocking, "list_blocks", return_value=[]):
+            added = blocking.block(["203.0.113.5"], runner=runner)
+        self.assertEqual(added, ["203.0.113.5"])
+        self.assertEqual(runner.nft_args[0], ["add", "table", "inet", "netwatch"])
+        self.assertIn("chain", runner.nft_args[1])
+        self.assertEqual(
+            runner.nft_args[2],
+            ["add", "rule", "inet", "netwatch", "input",
+             "ip", "saddr", "203.0.113.5", "drop"])
+
+    def test_block_skips_addresses_already_blocked(self):
+        runner = FakeRunner()
+        with mock.patch.object(blocking, "nft_path", return_value="/usr/sbin/nft"), \
+             mock.patch.object(blocking, "list_blocks",
+                               return_value=[{"address": "203.0.113.5",
+                                              "handle": 4}]):
+            added = blocking.block(["203.0.113.5"], runner=runner)
+        self.assertEqual(added, [])
+        # only the table/chain setup ran, no duplicate rule
+        self.assertEqual(len(runner.nft_args), 2)
+
+    def test_unblock_deletes_by_handle(self):
+        runner = FakeRunner()
+        with mock.patch.object(blocking, "nft_path", return_value="/usr/sbin/nft"), \
+             mock.patch.object(blocking, "list_blocks",
+                               return_value=[{"address": "203.0.113.5", "handle": 4},
+                                             {"address": "198.51.100.9", "handle": 5}]):
+            removed = blocking.unblock(["198.51.100.9"], runner=runner)
+        self.assertEqual(removed, ["198.51.100.9"])
+        self.assertEqual(
+            runner.nft_args[0],
+            ["delete", "rule", "inet", "netwatch", "input", "handle", "5"])
+
+    def test_unblock_all_drops_only_netwatch_table(self):
+        runner = FakeRunner()
+        with mock.patch.object(blocking, "nft_path", return_value="/usr/sbin/nft"), \
+             mock.patch.object(blocking, "list_blocks",
+                               return_value=[{"address": "203.0.113.5", "handle": 4}]):
+            count = blocking.unblock_all(runner=runner)
+        self.assertEqual(count, 1)
+        # Deleting our own table cannot disturb anyone else's rules.
+        self.assertEqual(runner.nft_args[0],
+                         ["delete", "table", "inet", "netwatch"])
+
+    def test_dry_run_executes_nothing(self):
+        runner = FakeRunner()
+        with mock.patch.object(blocking, "nft_path", return_value="/usr/sbin/nft"):
+            blocking.block(["203.0.113.5"], dry_run=True, runner=runner)
+        self.assertEqual(runner.calls, [])
+
+    def test_failure_surfaces_nft_message(self):
+        runner = FakeRunner(returncode=1, stderr="Error: Could not process rule")
+        with mock.patch.object(blocking, "nft_path", return_value="/usr/sbin/nft"), \
+             mock.patch("os.geteuid", return_value=0, create=True):
+            with self.assertRaises(blocking.BlockError) as caught:
+                blocking.run_nft(["add", "table", "inet", "netwatch"],
+                                 runner=runner)
+        self.assertIn("Could not process rule", str(caught.exception))
+
+    def test_missing_table_means_nothing_blocked(self):
+        runner = FakeRunner(returncode=1, stderr="No such file or directory")
+        with mock.patch.object(blocking, "nft_path", return_value="/usr/sbin/nft"), \
+             mock.patch("os.geteuid", return_value=0, create=True):
+            self.assertEqual(blocking.list_blocks(runner=runner), [])
+
+
+class TestPortability(unittest.TestCase):
+    def test_windows_is_reported_unsupported(self):
+        with mock.patch("os.name", "nt"):
+            self.assertFalse(blocking.nft_available())
+            self.assertIn("Linux", blocking.unsupported_reason())
+
+    def test_missing_nft_explains_how_to_install(self):
+        with mock.patch("os.name", "posix"), \
+             mock.patch.object(blocking, "nft_path", return_value=None):
+            self.assertFalse(blocking.nft_available())
+            self.assertIn("apt install nftables", blocking.unsupported_reason())
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
