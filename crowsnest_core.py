@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""netwatch analysis core.
+"""crowsnest analysis core.
 
 Turns packet data into a list of connections, split by direction, with a
 plain-English description of what each host is. Two entry points: analyze() for
@@ -161,7 +161,7 @@ def find_tshark() -> str:
 
 def _field_args(tshark: str) -> list[str]:
     # -n disables tshark's own name resolution: it would do blocking DNS lookups
-    # per address while dissecting, and netwatch resolves names itself.
+    # per address while dissecting, and crowsnest resolves names itself.
     cmd = [tshark, "-n", "-T", "fields", "-E", "separator=/t",
            "-E", "aggregator=;", "-E", "occurrence=a"]
     for f in FIELDS:

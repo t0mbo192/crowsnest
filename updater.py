@@ -1,6 +1,6 @@
-"""Tell the user when a newer netwatch exists.
+"""Tell the user when a newer crowsnest exists.
 
-Two routes, matching how netwatch actually gets deployed:
+Two routes, matching how crowsnest actually gets deployed:
 
   * **Running from a git clone** (the Raspberry Pi) -- compares the checkout
     against its upstream branch. Updating is `git pull`; the app is pure Python
@@ -26,7 +26,7 @@ import sys
 import urllib.error
 import urllib.request
 
-REPO = "t0mbo192/netwatch"
+REPO = "t0mbo192/crowsnest"
 RELEASES_PAGE = f"https://github.com/{REPO}/releases/latest"
 API_TIMEOUT = 6
 
@@ -50,20 +50,25 @@ def find_token() -> str | None:
     """A GitHub token, if one is available.
 
     Only needed while the repository is private -- the Releases API refuses
-    anonymous reads. Checked in order: explicit netwatch variable, the
+    anonymous reads. Checked in order: explicit crowsnest variable, the
     conventional GitHub ones, then the app's own prefs file.
     """
-    for name in ("NETWATCH_GITHUB_TOKEN", "GITHUB_TOKEN", "GH_TOKEN"):
+    for name in ("CROWSNEST_GITHUB_TOKEN", "GITHUB_TOKEN", "GH_TOKEN"):
         token = os.environ.get(name)
         if token:
             return token.strip()
-    try:
-        path = os.path.join(os.path.expanduser("~"), ".netwatch.json")
-        with open(path, encoding="utf-8") as f:
-            token = json.load(f).get("github_token")
-            return token.strip() if token else None
-    except (OSError, ValueError, AttributeError):
-        return None
+    home = os.path.expanduser("~")
+    # The second name is the pre-rename location, still read so a token saved
+    # under the old name keeps working.
+    for name in (".crowsnest.json", ".netwatch.json"):
+        try:
+            with open(os.path.join(home, name), encoding="utf-8") as f:
+                token = json.load(f).get("github_token")
+            if token:
+                return token.strip()
+        except (OSError, ValueError, AttributeError):
+            continue
+    return None
 
 
 def app_dir() -> str:
@@ -118,7 +123,7 @@ def check_releases(current: str, repo: str = REPO,
     request = urllib.request.Request(
         f"https://api.github.com/repos/{repo}/releases/latest",
         headers={"Accept": "application/vnd.github+json",
-                 "User-Agent": f"netwatch/{current}"})
+                 "User-Agent": f"crowsnest/{current}"})
     token = token or find_token()
     if token:
         request.add_header("Authorization", f"Bearer {token}")
@@ -156,13 +161,13 @@ def check_releases(current: str, repo: str = REPO,
 
 def check(current: str | None = None, repo: str = REPO,
          token: str | None = None) -> dict:
-    """Check for a newer netwatch by whichever route fits this install.
+    """Check for a newer crowsnest by whichever route fits this install.
 
     Returns a dict with a "status" of "update", "current" or "unknown", plus
     whatever context that route can offer. Never raises.
     """
     if current is None:
-        from netwatch_version import __version__ as current
+        from crowsnest_version import __version__ as current
     try:
         root = git_root()
         if root:
@@ -179,7 +184,7 @@ def summary(result: dict) -> str:
     """One line suitable for a status bar or console."""
     status = result.get("status")
     if status == "current":
-        return "netwatch is up to date."
+        return "crowsnest is up to date."
     if status == "update":
         if result.get("how") == "git":
             n = result.get("behind", 0)
@@ -190,9 +195,9 @@ def summary(result: dict) -> str:
 
 
 if __name__ == "__main__":
-    from netwatch_version import __version__
+    from crowsnest_version import __version__
     outcome = check(__version__)
-    print(f"netwatch {__version__}")
+    print(f"crowsnest {__version__}")
     print(summary(outcome))
     for key in ("how", "detail", "url", "command", "behind"):
         if outcome.get(key):

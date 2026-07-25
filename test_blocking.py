@@ -7,7 +7,7 @@ system call mocked out: which addresses a target expands to, which are refused,
 the exact commands produced, and how nft's output is read back.
 
 What these cannot prove is that nftables behaves as expected on a real machine.
-That needs a Linux box -- run `netwatch block <host> --dry-run` there first.
+That needs a Linux box -- run `crowsnest block <host> --dry-run` there first.
 
     python -m unittest test_blocking -v
 """
@@ -42,7 +42,7 @@ class FakeRunner:
 
 
 REAL_NFT_OUTPUT = """\
-table inet netwatch { # handle 7
+table inet crowsnest { # handle 7
 \tchain input { # handle 1
 \t\ttype filter hook input priority -10; policy accept;
 \t\tip saddr 203.0.113.5 drop # handle 4
@@ -156,8 +156,8 @@ class TestCommands(unittest.TestCase):
     def test_describe_produces_valid_nft_syntax(self):
         with mock.patch.object(blocking, "nft_path", return_value="/usr/sbin/nft"):
             lines = blocking.describe_commands(["203.0.113.5", "2001:db8::1"])
-        self.assertIn("add table inet netwatch", lines[0])
-        self.assertIn("add chain inet netwatch input", lines[1])
+        self.assertIn("add table inet crowsnest", lines[0])
+        self.assertIn("add chain inet crowsnest input", lines[1])
         # v4 uses "ip saddr", v6 must use "ip6 saddr" or nft rejects the rule.
         self.assertIn("ip saddr 203.0.113.5 drop", lines[2])
         self.assertIn("ip6 saddr 2001:db8::1 drop", lines[3])
@@ -168,11 +168,11 @@ class TestCommands(unittest.TestCase):
              mock.patch.object(blocking, "list_blocks", return_value=[]):
             added = blocking.block(["203.0.113.5"], runner=runner)
         self.assertEqual(added, ["203.0.113.5"])
-        self.assertEqual(runner.nft_args[0], ["add", "table", "inet", "netwatch"])
+        self.assertEqual(runner.nft_args[0], ["add", "table", "inet", "crowsnest"])
         self.assertIn("chain", runner.nft_args[1])
         self.assertEqual(
             runner.nft_args[2],
-            ["add", "rule", "inet", "netwatch", "input",
+            ["add", "rule", "inet", "crowsnest", "input",
              "ip", "saddr", "203.0.113.5", "drop"])
 
     def test_block_skips_addresses_already_blocked(self):
@@ -196,9 +196,9 @@ class TestCommands(unittest.TestCase):
         self.assertEqual(removed, ["198.51.100.9"])
         self.assertEqual(
             runner.nft_args[0],
-            ["delete", "rule", "inet", "netwatch", "input", "handle", "5"])
+            ["delete", "rule", "inet", "crowsnest", "input", "handle", "5"])
 
-    def test_unblock_all_drops_only_netwatch_table(self):
+    def test_unblock_all_drops_only_crowsnest_table(self):
         runner = FakeRunner()
         with mock.patch.object(blocking, "nft_path", return_value="/usr/sbin/nft"), \
              mock.patch.object(blocking, "list_blocks",
@@ -207,7 +207,7 @@ class TestCommands(unittest.TestCase):
         self.assertEqual(count, 1)
         # Deleting our own table cannot disturb anyone else's rules.
         self.assertEqual(runner.nft_args[0],
-                         ["delete", "table", "inet", "netwatch"])
+                         ["delete", "table", "inet", "crowsnest"])
 
     def test_dry_run_executes_nothing(self):
         runner = FakeRunner()
@@ -220,7 +220,7 @@ class TestCommands(unittest.TestCase):
         with mock.patch.object(blocking, "nft_path", return_value="/usr/sbin/nft"), \
              mock.patch("os.geteuid", return_value=0, create=True):
             with self.assertRaises(blocking.BlockError) as caught:
-                blocking.run_nft(["add", "table", "inet", "netwatch"],
+                blocking.run_nft(["add", "table", "inet", "crowsnest"],
                                  runner=runner)
         self.assertIn("Could not process rule", str(caught.exception))
 

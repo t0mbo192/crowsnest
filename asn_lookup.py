@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Name the organisation behind an IP address, offline.
 
-The curated keyword table in netwatch_core recognises hosts by name, but it can
+The curated keyword table in crowsnest_core recognises hosts by name, but it can
 only cover what someone thought to list, and it needs a hostname in the first
 place. Plenty of addresses have neither a useful name nor a PTR record, and used
 to show up as "Unknown host". An ASN database fixes that: every routable address
@@ -15,7 +15,7 @@ Lookups are local, so no address ever leaves the machine, and it works with no
 network at all -- which matters for a Pi appliance.
 
 Everything here degrades quietly: with no `maxminddb` module or no database file,
-lookups return nothing and netwatch falls back to its previous behaviour. Fetch a
+lookups return nothing and crowsnest falls back to its previous behaviour. Fetch a
 database with:
 
     python asn_lookup.py --fetch
@@ -49,7 +49,17 @@ _status = "not initialised"
 
 
 def data_dir() -> str:
-    """Where netwatch keeps its own files."""
+    """Where crowsnest keeps its own files."""
+    return os.path.join(os.path.expanduser("~"), ".crowsnest")
+
+
+def legacy_data_dir() -> str:
+    """Where this tool kept its files when it was called netwatch.
+
+    Still searched so a database downloaded under the old name keeps working
+    instead of being silently orphaned -- it is ~10 MB and nothing about it
+    changed with the rename.
+    """
     return os.path.join(os.path.expanduser("~"), ".netwatch")
 
 
@@ -57,15 +67,15 @@ def search_paths() -> list[str]:
     """Every place a database might reasonably live."""
     here = os.path.dirname(os.path.abspath(
         sys.executable if getattr(sys, "frozen", False) else __file__))
-    dirs = [data_dir(), here]
+    dirs = [data_dir(), legacy_data_dir(), here]
     if os.name == "nt":
         dirs.append(os.path.join(os.environ.get("PROGRAMDATA", r"C:\ProgramData"),
-                                 "netwatch"))
+                                 "crowsnest"))
     else:
         dirs += ["/usr/share/GeoIP", "/var/lib/GeoIP", "/usr/local/share/GeoIP"]
 
     paths = []
-    override = os.environ.get("NETWATCH_ASN_DB")
+    override = os.environ.get("CROWSNEST_ASN_DB")
     if override:
         paths.append(override)          # explicit wins over everything
     for d in dirs:
@@ -172,7 +182,7 @@ def fetch(dest_dir: str | None = None, months_back: int = 3) -> str:
         try:
             print(f"fetching {url}")
             request = urllib.request.Request(
-                url, headers={"User-Agent": "netwatch"})
+                url, headers={"User-Agent": "crowsnest"})
             with urllib.request.urlopen(request, timeout=180) as response, \
                     open(target + ".gz", "wb") as out:
                 shutil.copyfileobj(response, out)

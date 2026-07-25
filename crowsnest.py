@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-netwatch -- see which hosts this machine talks to, in plain language.
+crowsnest -- see which hosts this machine talks to, in plain language.
 
 Wireshark tells you everything; this tells you who. Every connection is split
 into outbound (this machine started it) and inbound (something else did), and
 each host is labelled with what it actually is rather than left as an address.
 
-    netwatch live -i eth0                  report each host once, as it appears
-    netwatch read capture.pcapng           analyse a saved capture
-    netwatch interfaces                    what can I capture on?
-    netwatch block 203.0.113.5             stop a host reaching this machine
-    netwatch asn --fetch                   get the database that names owners
+    crowsnest live -i eth0                  report each host once, as it appears
+    crowsnest read capture.pcapng           analyse a saved capture
+    crowsnest interfaces                    what can I capture on?
+    crowsnest block 203.0.113.5             stop a host reaching this machine
+    crowsnest asn --fetch                   get the database that names owners
 
 Direction comes from the TCP handshake: whoever sends the opening SYN started
 the connection. Encrypted traffic still reveals which hosts were contacted --
@@ -34,8 +34,8 @@ import sys
 import threading
 import time
 
-import netwatch_core as core
-from netwatch_version import __version__
+import crowsnest_core as core
+from crowsnest_version import __version__
 
 ESC = "\x1b["
 
@@ -165,7 +165,7 @@ def cmd_live(args) -> int:
     fatal = ""
 
     if not args.dashboard:
-        print(style(f"netwatch live{glyphs.sep}{args.interface}{glyphs.sep}"
+        print(style(f"crowsnest live{glyphs.sep}{args.interface}{glyphs.sep}"
                     f"this machine {', '.join(sorted(my_ips)) or '?'}", Style.BOLD))
         print(style("  each host is reported once, when first seen. "
                     "Ctrl-C for a summary.\n", Style.DIM), flush=True)
@@ -212,7 +212,7 @@ def cmd_live(args) -> int:
         mins, secs = divmod(int(now - started), 60)
         hours, mins = divmod(mins, 60)
         frame = [
-            style(f"netwatch live{glyphs.sep}{args.interface}{glyphs.sep}"
+            style(f"crowsnest live{glyphs.sep}{args.interface}{glyphs.sep}"
                   f"{hours:02d}:{mins:02d}:{secs:02d}{glyphs.sep}"
                   f"{meta['packets']:,} packets{glyphs.sep}"
                   f"this machine {meta['my_ips'] or '?'}", Style.BOLD),
@@ -294,7 +294,7 @@ def cmd_read(args) -> int:
 def print_report(rows, meta, args, glyphs: Glyphs, style: Style,
                  title: str, allowlisted: bool = False) -> None:
     width = term_width()
-    print(style(f"netwatch {__version__}{glyphs.sep}{title}{glyphs.sep}"
+    print(style(f"crowsnest {__version__}{glyphs.sep}{title}{glyphs.sep}"
                 f"{meta.get('packets', 0):,} packets{glyphs.sep}"
                 f"this machine {meta.get('my_ips') or '?'}", Style.BOLD))
 
@@ -324,7 +324,7 @@ def print_report(rows, meta, args, glyphs: Glyphs, style: Style,
     print(style(summary_line(rows, meta, glyphs, 0), Style.DIM))
     if not core.asn_lookup.available():
         print(style("  (no ASN database: some hosts show as addresses only "
-                    "- run `netwatch asn --fetch`)", Style.DIM))
+                    "- run `crowsnest asn --fetch`)", Style.DIM))
 
 
 # ---------------------------------------------------------------- allowlist
@@ -456,11 +456,11 @@ def cmd_block(args) -> int:
     for line in blocking.describe_commands(fresh):
         print(f"  {line}")
     print(style("\nInbound traffic from these hosts will be dropped. Existing "
-                "firewall rules are untouched;\nnetwatch only writes to its own "
+                "firewall rules are untouched;\ncrowsnest only writes to its own "
                 f"'{blocking.TABLE}' table.", Style.DIM))
     if not args.persist:
         print(style("This lasts until reboot. Add --persist to record it for "
-                    "`netwatch blocks --restore`.", Style.DIM))
+                    "`crowsnest blocks --restore`.", Style.DIM))
 
     if args.dry_run:
         print("\ndry run: nothing was changed.")
@@ -489,7 +489,7 @@ def cmd_unblock(args) -> int:
             print("nothing is blocked.")
             return 0
         print(f"This will remove all {len(entries)} block(s) and drop "
-              f"netwatch's '{blocking.TABLE}' table.")
+              f"crowsnest's '{blocking.TABLE}' table.")
         if not _confirm("Remove them all?", args.yes):
             print("nothing was changed.")
             return 1
@@ -542,7 +542,7 @@ def cmd_blocks(args) -> int:
         print("nothing is blocked.")
         if recorded:
             print(f"{len(recorded)} recorded but not active -- "
-                  f"`netwatch blocks --restore` reapplies them.")
+                  f"`crowsnest blocks --restore` reapplies them.")
         return 0
     print(f"blocked ({len(entries)}):")
     for entry in entries:
@@ -554,7 +554,7 @@ def cmd_blocks(args) -> int:
 def cmd_update(args) -> int:
     import updater
     result = updater.check(__version__)
-    print(f"netwatch {__version__}")
+    print(f"crowsnest {__version__}")
     print(updater.summary(result))
     for key in ("how", "detail", "url", "command", "behind"):
         if result.get(key):
@@ -564,10 +564,10 @@ def cmd_update(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        prog="netwatch", description=__doc__.strip().split("\n\n")[1],
+        prog="crowsnest", description=__doc__.strip().split("\n\n")[1],
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Run `netwatch <command> -h` for a command's own options.")
-    ap.add_argument("--version", action="version", version=f"netwatch {__version__}")
+        epilog="Run `crowsnest <command> -h` for a command's own options.")
+    ap.add_argument("--version", action="version", version=f"crowsnest {__version__}")
     sub = ap.add_subparsers(dest="command", required=True)
 
     def shared(p):
@@ -623,7 +623,7 @@ def build_parser() -> argparse.ArgumentParser:
     blk.add_argument("targets", nargs="+", metavar="HOST",
                      help="hostname or address to block")
     blk.add_argument("--persist", action="store_true",
-                     help="record it so `netwatch blocks --restore` can reapply "
+                     help="record it so `crowsnest blocks --restore` can reapply "
                           "after a reboot (blocks are session-only otherwise)")
     blk.add_argument("--dry-run", action="store_true",
                      help="show what would happen and stop")
@@ -645,7 +645,7 @@ def build_parser() -> argparse.ArgumentParser:
     bls.add_argument("--yes", action="store_true", help="do not ask first")
     bls.set_defaults(func=cmd_blocks)
 
-    upd = sub.add_parser("update", help="check whether a newer netwatch exists")
+    upd = sub.add_parser("update", help="check whether a newer crowsnest exists")
     upd.set_defaults(func=cmd_update)
     return ap
 

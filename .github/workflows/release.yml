@@ -1,12 +1,12 @@
 name: Release
 
 # Pushing a version tag is the whole release process: this builds a standalone
-# netwatch.exe and attaches it to a GitHub Release.
+# crowsnest.exe and attaches it to a GitHub Release.
 #
-#   1. bump __version__ in netwatch_version.py
+#   1. bump __version__ in crowsnest_version.py
 #   2. commit, then:  git tag v1.1.0 && git push origin main --tags
 #
-# Linux and the Raspberry Pi do not use this artifact -- netwatch is pure Python
+# Linux and the Raspberry Pi do not use this artifact -- crowsnest is pure Python
 # there, so a git clone plus `git pull` is the whole install and update story.
 
 on:
@@ -36,14 +36,14 @@ jobs:
         id: version
         shell: bash
         run: |
-          file_version=$(python -c "from netwatch_version import __version__; print(__version__)")
+          file_version=$(python -c "from crowsnest_version import __version__; print(__version__)")
           echo "file=$file_version" >> "$GITHUB_OUTPUT"
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             tag_version="${GITHUB_REF_NAME#v}"
             # A tag disagreeing with the source would ship a mislabelled build,
             # and the update check would then compare the wrong number.
             if [ "$tag_version" != "$file_version" ]; then
-              echo "::error::Tag v$tag_version does not match netwatch_version.py ($file_version)"
+              echo "::error::Tag v$tag_version does not match crowsnest_version.py ($file_version)"
               exit 1
             fi
           fi
@@ -63,45 +63,45 @@ jobs:
       - name: Smoke-test before packaging
         shell: bash
         run: |
-          python netwatch.py --version
-          python netwatch.py --help > /dev/null
+          python crowsnest.py --version
+          python crowsnest.py --help > /dev/null
           for sub in live read interfaces asn update; do
-            echo "checking: netwatch $sub --help"
-            python netwatch.py "$sub" --help > /dev/null
+            echo "checking: crowsnest $sub --help"
+            python crowsnest.py "$sub" --help > /dev/null
           done
-          python -c "import netwatch, netwatch_core, asn_lookup, updater, netwatch_version"
+          python -c "import crowsnest, crowsnest_core, asn_lookup, updater, crowsnest_version"
 
-      # A console app, not windowed: netwatch is a terminal tool now.
+      # A console app, not windowed: crowsnest is a terminal tool now.
       # maxminddb is imported lazily inside a function, so name it explicitly
       # rather than relying on static analysis to spot it.
-      - name: Build netwatch.exe
+      - name: Build crowsnest.exe
         run: >
-          python -m PyInstaller --onefile --console --name netwatch
+          python -m PyInstaller --onefile --console --name crowsnest
           --hidden-import maxminddb
           --distpath dist --workpath build --specpath build
-          netwatch.py
+          crowsnest.py
 
       - name: Verify the binary runs
         shell: bash
         run: |
-          ./dist/netwatch.exe --version
-          ./dist/netwatch.exe --help > /dev/null
+          ./dist/crowsnest.exe --version
+          ./dist/crowsnest.exe --help > /dev/null
           # maxminddb is imported lazily inside a function, so static analysis
           # can miss it. If it did not get bundled, ASN names silently stop
           # working in the released binary -- assert it is really in there.
-          status="$(./dist/netwatch.exe asn 2>&1 || true)"
+          status="$(./dist/crowsnest.exe asn 2>&1 || true)"
           echo "$status"
           if echo "$status" | grep -qi "maxminddb is not installed"; then
-            echo "::error::maxminddb was not bundled into netwatch.exe"
+            echo "::error::maxminddb was not bundled into crowsnest.exe"
             exit 1
           fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: netwatch-${{ steps.version.outputs.file }}
+          name: crowsnest-${{ steps.version.outputs.file }}
           path: |
-            dist/netwatch.exe
+            dist/crowsnest.exe
             dist/*.whl
           if-no-files-found: error
 
@@ -112,6 +112,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
-            --title "netwatch ${{ steps.version.outputs.file }}" \
+            --title "crowsnest ${{ steps.version.outputs.file }}" \
             --generate-notes \
-            "dist/netwatch.exe#netwatch.exe (Windows, standalone)"
+            "dist/crowsnest.exe#crowsnest.exe (Windows, standalone)"

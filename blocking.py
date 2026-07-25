@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 """Stop a host from reaching this machine, using nftables.
 
-netwatch watches a passive copy of traffic, so a block stops everything that
+crowsnest watches a passive copy of traffic, so a block stops everything that
 comes *after* it -- it cannot prevent the contact that revealed the host in the
 first place. That suits a peer that keeps knocking; it is not an inline firewall.
 
-Everything lives in netwatch's own nftables table, so existing firewall rules are
+Everything lives in crowsnest's own nftables table, so existing firewall rules are
 never read, rewritten or flushed:
 
-    table inet netwatch {
+    table inet crowsnest {
       chain input { type filter hook input priority -10; policy accept;
                     ip saddr 203.0.113.5 drop }
     }
 
-Because the table is ours alone, listing shows only netwatch's blocks and
+Because the table is ours alone, listing shows only crowsnest's blocks and
 removing one cannot disturb anything else.
 
 Blocks are session-scoped: they vanish on reboot, which is the escape hatch if
-one locks something out. Recording them (see save_record) lets `netwatch blocks
+one locks something out. Recording them (see save_record) lets `crowsnest blocks
 --restore` put them back deliberately.
 
 Three addresses are refused unless explicitly forced, because blocking them
@@ -38,12 +38,12 @@ import shutil
 import socket
 import subprocess
 
-TABLE = "netwatch"
+TABLE = "crowsnest"
 CHAIN = "input"
 # Slightly ahead of the usual filter hook, so a drop lands before other accepts.
 CHAIN_SPEC = "type filter hook input priority -10 ; policy accept ;"
 
-RECORD_DIR = os.path.join(os.path.expanduser("~"), ".netwatch")
+RECORD_DIR = os.path.join(os.path.expanduser("~"), ".crowsnest")
 RECORD_PATH = os.path.join(RECORD_DIR, "blocks.json")
 
 
@@ -104,7 +104,7 @@ def describe_commands(addresses: list[str]) -> list[str]:
 
 
 def ensure_table(dry_run: bool = False, runner=subprocess.run) -> None:
-    """Create netwatch's table and chain. Safe to repeat."""
+    """Create crowsnest's table and chain. Safe to repeat."""
     run_nft(["add", "table", "inet", TABLE], dry_run, runner)
     run_nft(["add", "chain", "inet", TABLE, CHAIN, "{", *CHAIN_SPEC.split(), "}"],
             dry_run, runner)
@@ -247,7 +247,7 @@ def unblock(addresses: list[str], dry_run: bool = False,
 
 
 def unblock_all(dry_run: bool = False, runner=subprocess.run) -> int:
-    """Drop netwatch's whole table, leaving other firewall rules untouched."""
+    """Drop crowsnest's whole table, leaving other firewall rules untouched."""
     entries = list_blocks(runner=runner)
     if entries:
         run_nft(["delete", "table", "inet", TABLE], dry_run, runner)
@@ -270,7 +270,7 @@ def parse_ruleset(text: str) -> list[dict]:
 
 
 def list_blocks(runner=subprocess.run) -> list[dict]:
-    """Everything netwatch is currently blocking. Empty if the table is absent."""
+    """Everything crowsnest is currently blocking. Empty if the table is absent."""
     try:
         output = run_nft(["-a", "list", "table", "inet", TABLE], False, runner)
     except BlockError:
@@ -289,7 +289,7 @@ def load_record() -> list[str]:
 
 
 def save_record(addresses: list[str]) -> None:
-    """Remember these so `netwatch blocks --restore` can reapply them."""
+    """Remember these so `crowsnest blocks --restore` can reapply them."""
     existing = load_record()
     merged = existing + [a for a in addresses if a not in existing]
     os.makedirs(RECORD_DIR, exist_ok=True)
@@ -308,20 +308,20 @@ def forget_record(addresses: list[str] | None = None) -> None:
 def restore_hint() -> str:
     """How to make recorded blocks come back after a reboot.
 
-    Printed rather than installed: netwatch does not add system services on your
+    Printed rather than installed: crowsnest does not add system services on your
     behalf.
     """
     return (
         "To reapply recorded blocks automatically after a reboot, install a\n"
         "systemd unit that runs the restore for you:\n\n"
-        "  sudo tee /etc/systemd/system/netwatch-blocks.service >/dev/null <<'UNIT'\n"
+        "  sudo tee /etc/systemd/system/crowsnest-blocks.service >/dev/null <<'UNIT'\n"
         "  [Unit]\n"
-        "  Description=Reapply netwatch blocks\n"
+        "  Description=Reapply crowsnest blocks\n"
         "  After=network-pre.target nftables.service\n"
         "  [Service]\n"
         "  Type=oneshot\n"
-        f"  ExecStart={shutil.which('netwatch') or 'netwatch'} blocks --restore --yes\n"
+        f"  ExecStart={shutil.which('crowsnest') or 'crowsnest'} blocks --restore --yes\n"
         "  [Install]\n"
         "  WantedBy=multi-user.target\n"
         "  UNIT\n"
-        "  sudo systemctl enable netwatch-blocks.service\n")
+        "  sudo systemctl enable crowsnest-blocks.service\n")
