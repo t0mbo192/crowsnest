@@ -678,7 +678,9 @@ class LiveTracker:
                     "rate": delta / elapsed if elapsed > 0 else 0.0,
                     "local": local})
             rows = merge_by_host(rows)
-            mine = sorted(self.my_ips)
+            # Loopback is always ours and tells the reader nothing.
+            mine = sorted(a for a in self.my_ips
+                          if not a.startswith(("127.", "::1")))
             extra = f" +{len(mine) - 2}" if len(mine) > 2 else ""
             meta = {"packets": self.packets, "bytes": self.bytes,
                     "out": sum(1 for r in rows if r["direction"] == "out"),

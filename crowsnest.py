@@ -39,6 +39,11 @@ from crowsnest_version import __version__
 
 ESC = "\x1b["
 
+# How long to let reverse DNS answer before reporting a host by address. The
+# resolver runs every few seconds, so most names arrive inside this, and the one
+# line a host gets is then its most useful one.
+NAME_GRACE = 4.0
+
 
 # ----------------------------------------------------------------- terminal
 def enable_ansi() -> bool:
@@ -162,6 +167,7 @@ def cmd_live(args) -> int:
     started = time.monotonic()
     last_draw = 0.0
     announced: set[tuple] = set()
+    first_seen: dict[tuple, float] = {}
     fatal = ""
 
     if not args.dashboard:
@@ -194,13 +200,23 @@ def cmd_live(args) -> int:
 
         if not args.dashboard:
             # One line per host, the first time it is seen, and never again.
-            # Anything already reported stays reported -- no redrawing, no
-            # repetition, nothing moving on screen.
+            # Nothing redraws and nothing repeats.
             for r in rows:
-                ident = (r["direction"], r["site"])
-                if ident in announced:
+                # Both the address and the displayed name are remembered.
+                # Keying on the name alone announced a host twice -- once as a
+                # bare address, then again seconds later once reverse DNS had
+                # named it. Keying on the address alone would split one site
+                # answering on several addresses into several lines.
+                keys = {(r["direction"], r["ip"]), (r["direction"], r["site"])}
+                if keys & announced:
                     continue
-                announced.add(ident)
+                # Give reverse DNS a moment to answer before settling for an
+                # address, so the one line a host gets is its most useful one.
+                if not r["name"]:
+                    since = first_seen.setdefault((r["direction"], r["ip"]), now)
+                    if now - since < NAME_GRACE:
+                        continue
+                announced |= keys
                 outbound = r["direction"].startswith("out")
                 arrow = glyphs.out if outbound else glyphs.inb
                 line = (f"  {time.strftime('%H:%M:%S')}  {arrow}  "
