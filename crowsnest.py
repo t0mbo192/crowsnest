@@ -108,6 +108,7 @@ class Style:
 
 class Glyphs:
     def __init__(self, unicode_safe: bool):
+        self.unicode = unicode_safe
         self.out = "↑" if unicode_safe else "^"
         self.inb = "↓" if unicode_safe else "v"
         self.sep = "  ·  " if unicode_safe else "  |  "
@@ -120,14 +121,31 @@ class Glyphs:
             self.h, self.v = "-", "|"
 
 
-# A lookout's basket atop a mast, above the waterline. Deliberately ASCII so it
-# renders the same on a Pi console, an SSH session and a Windows terminal.
-LOGO = [
-    "   ___   ",
-    "  |o..|  ",
-    "  |___|  ",
-    " ~~~|~~~ ",
+# The lookout's basket at the masthead, above the waterline. Box drawing where
+# the terminal can render it, with an ASCII mirror where it cannot -- the shape
+# has to survive a plain Pi console as well as a modern terminal.
+LOGO_UNICODE = [
+    ("  ╭─────╮  ", "nest"),
+    ("  │ ◦ ◦ │  ", "nest"),
+    ("  ╰──┬──╯  ", "nest"),
+    ("  ═══╪═══  ", "spar"),
+    ("  ≈≈≈┴≈≈≈  ", "sea"),
 ]
+LOGO_ASCII = [
+    "   .-----.  ",
+    "   | o o |  ",
+    "   '--+--'  ",
+    "  ===-+-=== ",
+    "  ~~~~+~~~~ ",
+]
+LOGO_PARTS = ("nest", "nest", "nest", "spar", "sea")
+
+
+def logo_lines(unicode_safe: bool, style: Style) -> list[str]:
+    """The mark, coloured so the basket reads first and the sea recedes."""
+    tint = {"nest": Style.OUT, "spar": Style.GREY, "sea": Style.FRAME}
+    art = ([text for text, _ in LOGO_UNICODE] if unicode_safe else LOGO_ASCII)
+    return [style(text, tint[part]) for text, part in zip(art, LOGO_PARTS)]
 
 
 # -------------------------------------------------------------------- panels
@@ -201,13 +219,17 @@ def render_dashboard(rows: list[dict], meta: dict, glyphs: Glyphs, style: Style,
         f"{core.human_bytes(meta.get('bytes', 0))}",
         f"this machine {meta.get('my_ips') or '?'}",
     ]
+    art = logo_lines(glyphs.unicode, style)
     header = []
-    for i, art in enumerate(LOGO):
-        right = facts[i - 1] if 0 < i <= len(facts) else ""
+    for i, line in enumerate(art):
+        # Line 0 carries the name; the rest carry a fact each, and any spare
+        # logo lines simply have nothing beside them.
         if i == 0:
-            right = style("CROWSNEST", Style.BOLD) + style(
-                "   network lookout", Style.DIM)
-        header.append(f" {art}  {right}")
+            right = (style("CROWSNEST", Style.BOLD) +
+                     style("   network lookout", Style.DIM))
+        else:
+            right = facts[i - 1] if i - 1 < len(facts) else ""
+        header.append(f" {line}  {right}")
 
     outbound = [r for r in rows if r["direction"].startswith("out")]
     inbound = [r for r in rows if not r["direction"].startswith("out")]
@@ -217,11 +239,14 @@ def render_dashboard(rows: list[dict], meta: dict, glyphs: Glyphs, style: Style,
     out_limit = max(2, min(len(outbound), spare - min(len(inbound), 4)))
     in_limit = max(2, spare - out_limit)
 
+    def hosts(n: int) -> str:
+        return f"{n} host" if n == 1 else f"{n} hosts"
+
     frame = header + [""]
-    frame += box(f"OUTBOUND   {len(outbound)} hosts",
+    frame += box(f"OUTBOUND   {hosts(len(outbound))}",
                  panel_rows(outbound, width, out_limit, style, inbound=False),
                  width, glyphs, style)
-    frame += box(f"INBOUND   {len(inbound)} hosts",
+    frame += box(f"INBOUND   {hosts(len(inbound))}",
                  panel_rows(inbound, width, in_limit, style, inbound=True),
                  width, glyphs, style)
     n_out, n_in = len(outbound), len(inbound)
