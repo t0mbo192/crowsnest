@@ -1,0 +1,12 @@
+# Shell scripts must keep LF endings. Checked out with CRLF on Windows and then
+# copied to a Pi, they fail with "bad interpreter: /usr/bin/env^M".
+*.sh text eol=lf
+
+# Windows-only files, which want CRLF.
+*.cmd text eol=crlf
+*.iss text eol=crlf
+
+# Let git normalise text but leave these alone.
+*.png binary
+*.pcap binary
+*.pcapng binary

@@ -1,0 +1,91 @@
+name: Release
+
+# Pushing a version tag is the whole release process: this builds the Windows
+# app, wraps it in an installer, and publishes both to a GitHub Release.
+#
+#   1. bump __version__ in netwatch_version.py
+#   2. commit, then:  git tag v1.0.1 && git push origin main --tags
+#
+# The Raspberry Pi does not use these artifacts -- it runs from a git clone and
+# updates with `git pull`, since the app is pure Python and needs no build.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build the installer but do not publish a release"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          file_version=$(python -c "from netwatch_version import __version__; print(__version__)")
+          echo "file=$file_version" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+            # A tag that disagrees with the source would ship a mislabelled
+            # build, and the in-app update check would compare the wrong number.
+            if [ "$tag_version" != "$file_version" ]; then
+              echo "::error::Tag v$tag_version does not match netwatch_version.py ($file_version)"
+              exit 1
+            fi
+          fi
+          echo "Building version $file_version"
+
+      - name: Install build tools
+        run: pip install --upgrade pyinstaller
+
+      - name: Build application
+        run: >
+          python -m PyInstaller --onefile --windowed --name ConnectionViewer
+          --distpath dist --workpath build --specpath build
+          connection_viewer.py
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: bash
+        run: |
+          iscc="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          "$iscc" "/DAppVersion=${{ steps.version.outputs.file }}" packaging/netwatch.iss
+          ls -la dist/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: netwatch-windows-${{ steps.version.outputs.file }}
+          path: |
+            dist/netwatch-setup-*.exe
+            dist/ConnectionViewer.exe
+          if-no-files-found: error
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${{ steps.version.outputs.file }}"
+          gh release create "$GITHUB_REF_NAME" \
+            --title "netwatch $version" \
+            --generate-notes \
+            "dist/netwatch-setup-$version.exe#netwatch installer (Windows)" \
+            "dist/ConnectionViewer.exe#Portable executable (Windows)"

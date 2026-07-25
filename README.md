@@ -58,25 +58,76 @@ python analyze_capture.py capture.pcapng --rdns
 python pcap_report.py capture.pcapng
 ```
 
-### Build the standalone app
+## Installing
+
+**Windows** — download `netwatch-setup-<version>.exe` from
+[Releases](https://github.com/t0mbo192/netwatch/releases) and run it. It installs
+per-user (no admin prompt), adds a Start Menu entry and an uninstaller, creates
+the `Documents\Captures` drop folder, and warns you up front if Wireshark is
+missing. A portable `ConnectionViewer.exe` is attached to each release too, if
+you'd rather not install anything.
+
+**Raspberry Pi / Linux** — run from a git clone; there is no build step, because
+the app is pure Python:
 
 ```bash
-pip install pyinstaller
+sudo apt install tshark python3-tk
+git clone https://github.com/t0mbo192/netwatch.git
+cd netwatch && ./install-pi.sh
+```
+
+That adds a `netwatch` command and an applications-menu entry, and checks the
+dependencies. It never invokes `sudo` itself — if something is missing it prints
+the command for you to run.
+
+## Updating
+
+netwatch checks for a newer version on startup, in the background, and shows an
+**Update** button in the header if it finds one. It never downloads or installs
+anything on its own; the button just tells you how to take it.
+
+| Install type | How it checks | How you update |
+|---|---|---|
+| git clone (Pi) | compares your checkout against its upstream branch | `git pull`, then restart |
+| Installer / portable `.exe` | reads the latest GitHub Release | download and run the new installer |
+
+Check from the command line at any time:
+
+```bash
+python updater.py
+```
+
+> While the repository is private, the Release check needs a GitHub token —
+> set `NETWATCH_GITHUB_TOKEN`, or add `"github_token"` to `~/.netwatch.json`.
+> The git route needs no token, and neither does anything once the repo is
+> public. A failed check is silent apart from a status-bar note.
+
+## Releasing
+
+Version lives in one place, [`netwatch_version.py`](netwatch_version.py). Pushing
+a tag builds and publishes everything:
+
+```bash
+git tag v1.0.1 && git push origin main --tags
+```
+
+[`.github/workflows/release.yml`](.github/workflows/release.yml) then builds the
+app with PyInstaller, wraps it with [Inno Setup](packaging/netwatch.iss), and
+publishes both to a GitHub Release. It **fails the build if the tag disagrees
+with `netwatch_version.py`**, so a mislabelled version can't ship. To rehearse
+without publishing, run the workflow manually from the Actions tab with
+`dry_run` left on.
+
+Building locally, if you want to:
+
+```bash
 python -m PyInstaller --onefile --windowed --name ConnectionViewer connection_viewer.py
-# -> dist/ConnectionViewer.exe  (no Python needed to run; still needs Wireshark for tshark)
 ```
 
 ## Running on a Raspberry Pi
 
 The intended deployment is a Pi acting as a network monitor on an attached
-display:
-
-```bash
-sudo apt install tshark python3-tk
-git clone https://github.com/t0mbo192/netwatch.git
-cd netwatch
-python3 connection_viewer.py
-```
+display — see [Installing](#installing) above for the setup commands.
 
 The dark theme is the default, which suits an always-on monitor, and the stat
 cards are sized to read from across a room. Your theme choice is remembered in

@@ -31,11 +31,15 @@ import subprocess
 import sys
 import threading
 import time
+import webbrowser
 from collections import defaultdict
 
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import ttk, filedialog, messagebox
+
+import updater
+from netwatch_version import __version__
 
 # Folder scanned for the newest capture when the app starts with no file.
 DROP_DIR = os.path.join(os.path.expanduser("~"), "Documents", "Captures")
@@ -579,16 +583,18 @@ class App:
         self.meta: dict = {}
         self.all_rows: list[dict] = []
         self.q: queue.Queue = queue.Queue()
+        self.update_q: queue.Queue = queue.Queue()   # update check, own channel
         self._busy = False
         self._sort_col = "bytes"
         self._sort_desc = True
+        self._update = None
 
         self.prefs = load_prefs()
         self.mode = self.prefs.get("theme", "dark")
         self.style = ttk.Style(root)
         self.theme = apply_theme(root, self.style, self.mode)
 
-        root.title("netwatch — Connection Viewer")
+        root.title(f"netwatch {__version__} — Connection Viewer")
         root.geometry("1180x740")
         root.minsize(900, 520)
 
@@ -601,6 +607,7 @@ class App:
         # above would otherwise fire refresh() before the table is built.
         self.filter_var.trace_add("write", lambda *_: self.refresh())
 
+        self._start_update_check()
         if initial:
             self.load(initial)
 
@@ -623,6 +630,9 @@ class App:
                    ).pack(side="right", padx=(0, 8))
         ttk.Button(right, text="Open Capture", style="Accent.TButton",
                    command=self.choose).pack(side="right", padx=(0, 8))
+        # Stays hidden unless a newer version is actually found.
+        self.update_btn = ttk.Button(right, text="", command=self._show_update)
+
 
     def _build_stats(self):
         wrap = ttk.Frame(self.root, padding=(18, 0, 18, 12))
@@ -722,6 +732,59 @@ class App:
         # Packed only while working -- an idle indeterminate bar still paints a
         # stray chunk, which reads as "something is running" when nothing is.
         self.progress = ttk.Progressbar(bar, mode="indeterminate", length=170)
+
+    # ----------------------------------------------------------------- updates
+    def _start_update_check(self):
+        """Ask in the background whether a newer netwatch exists.
+
+        Purely advisory -- nothing is downloaded, and a failed check is silent
+        apart from the status bar. Runs off the main thread so a slow network
+        can never stall the window.
+        """
+        def worker():
+            try:
+                self.update_q.put(updater.check(__version__))
+            except Exception:
+                self.update_q.put({"status": "unknown"})
+
+        threading.Thread(target=worker, daemon=True).start()
+        self.root.after(400, self._poll_update)
+
+    def _poll_update(self):
+        try:
+            result = self.update_q.get_nowait()
+        except queue.Empty:
+            self.root.after(400, self._poll_update)
+            return
+        self._update = result
+        if result.get("status") != "update":
+            return
+        if result.get("how") == "git":
+            n = result.get("behind", 0)
+            label = f"● Update: {n} commit{'' if n == 1 else 's'}"
+        else:
+            label = f"● Update: v{result.get('version')}"
+        self.update_btn.config(text=label, style="Accent.TButton")
+        self.update_btn.pack(side="right", padx=(0, 8))
+
+    def _show_update(self):
+        """Explain how to take the update -- we never apply it silently."""
+        r = self._update or {}
+        if r.get("how") == "git":
+            n = r.get("behind", 0)
+            body = (f"{n} new commit{'' if n == 1 else 's'} available.\n\n"
+                    f"Latest: {r.get('detail', '')}\n\n"
+                    f"Update with:\n    git pull\n\n"
+                    f"Then restart netwatch.")
+            messagebox.showinfo("Update available", body)
+            return
+        version = r.get("version", "")
+        if messagebox.askyesno(
+                "Update available",
+                f"netwatch v{version} is available "
+                f"(you have {__version__}).\n\n"
+                f"Open the download page in your browser?"):
+            webbrowser.open(r.get("url") or updater.RELEASES_PAGE)
 
     # ------------------------------------------------------------------ theme
     def _theme_label(self) -> str:
