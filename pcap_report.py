@@ -89,16 +89,9 @@ def is_private(ip: str) -> bool:
         return False
 
 
-_rdns_cache: dict[str, str] = {}
-
-
-def rdns(ip: str) -> str:
-    if ip not in _rdns_cache:
-        try:
-            _rdns_cache[ip] = socket.gethostbyaddr(ip)[0].lower()
-        except OSError:
-            _rdns_cache[ip] = ""
-    return _rdns_cache[ip]
+# Reverse DNS comes from netwatch_core, which runs the lookups concurrently
+# under one deadline instead of serially.
+from netwatch_core import resolve_many  # noqa: E402
 
 
 # --------------------------------------------------------------------- analysis
@@ -220,25 +213,28 @@ def analyze(capture: str) -> dict:
         agg["protos"] |= fl.protos
         agg["hostnames"] |= fl.hostnames
 
-    def rows(bucket, resolve_names):
+    # Resolve every unknown address in one concurrent, deadline-bounded pass.
+    # Looking them up one at a time stalled for ~9s per address with no working
+    # PTR record, which added up to a report that looked hung.
+    needs_name = [ip for bucket in (outbound, inbound) for ip, a in bucket.items()
+                  if not a["hostnames"] and ip not in ip_to_name]
+    resolved = resolve_many(needs_name) if needs_name else {}
+
+    def rows(bucket):
         out = []
         for ip, a in bucket.items():
             if a["hostnames"]:
                 name = sorted(a["hostnames"])[0]
-            elif ip in ip_to_name:
-                name = ip_to_name[ip]
-            elif resolve_names:
-                name = rdns(ip)
             else:
-                name = ""
+                name = ip_to_name.get(ip) or resolved.get(ip, "")
             out.append({"ip": ip, "name": name, "packets": a["packets"],
                         "bytes": a["bytes"], "local": is_private(ip),
                         "protos": ", ".join(sorted(a["protos"]))})
         out.sort(key=lambda r: -r["bytes"])
         return out
 
-    out_rows = rows(outbound, resolve_names=True)
-    in_rows = rows(inbound, resolve_names=True)
+    out_rows = rows(outbound)
+    in_rows = rows(inbound)
 
     # Domains looked up but not already shown as an outbound connection.
     shown = {r["name"] for r in out_rows if r["name"]}

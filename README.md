@@ -27,8 +27,10 @@ whoever sends the opening SYN started the connection.
 
 | File | What it is |
 |------|-----------|
-| `connection_viewer.py` | **The main app** — a desktop GUI with dark and light themes: a sortable, filterable table of inbound/outbound connections, each host tagged with a plain-English description. Builds into a standalone `.exe`. |
-| `analyze_capture.py` | CLI: hosts grouped by root domain, allowlist flagging, optional GeoIP, CSV export. Headless-friendly. |
+| `netwatch_live.py` | **Live terminal view** — watch connections form in real time, no display needed. Works over SSH on a headless Pi. |
+| `connection_viewer.py` | **Desktop app** with dark and light themes: a sortable, filterable table of inbound/outbound connections, each host tagged with a plain-English description. Builds into a standalone `.exe`. |
+| `netwatch_core.py` | Shared analysis: direction, host names, descriptions. No GUI imports, so it works headless. |
+| `analyze_capture.py` | CLI: hosts grouped by root domain, allowlist flagging, optional GeoIP, CSV export. |
 | `pcap_report.py` | Prints a simple two-section (outbound / inbound) text report. |
 | `analyze_gui.py` | An earlier, fuller GUI (allowlist, GeoIP, flagged-only). |
 
@@ -45,7 +47,38 @@ library, which keeps installation on a Raspberry Pi to the two `apt` lines above
 
 ## Usage
 
-Capture traffic in Wireshark (or any tool that saves a `.pcapng`), then:
+### Live, in a terminal
+
+Watch connections as they happen — no capture file, no display, so it works over
+SSH on a headless Pi:
+
+```bash
+sudo python3 netwatch_live.py --list        # which interfaces can I watch?
+sudo python3 netwatch_live.py -i eth0      # watch that one
+```
+
+```
+netwatch live  ·  eth0  ·  00:00:10  ·  2,795 packets  ·  this machine 192.168.0.120
+
+     SITE / HOST                        WHAT IT IS                   DATA       RATE
+  ↑  ord37s57-in-f10.1e100.net          Google infrastructure       2.3 MB 243.5 KB/s
+  ↑  github.com                         GitHub - code hosting     611.1 KB          -
+  ↑  mobile.events.data.microsoft.com   Microsoft services         12.3 KB          -
+  ↓  laptop.lan                         Local network device        4.2 KB    1.1 KB/s
+
+  18 connections (14 out, 4 in)  ·  2.9 MB total  ·  10 more
+```
+
+Useful flags: `--top N` rows, `--interval` redraw seconds, `--plain` to log each
+new host instead of redrawing, `--duration N` to stop automatically, `--me IP` if
+it guesses the wrong local address. Ctrl-C prints a full inbound/outbound summary.
+
+Live capture needs privileges — run with `sudo`, or
+`sudo usermod -aG wireshark $USER` and log back in.
+
+### From a saved capture
+
+Capture traffic in Wireshark (or anything that saves a `.pcapng`), then:
 
 ```bash
 # Desktop GUI
