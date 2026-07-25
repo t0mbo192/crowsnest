@@ -182,9 +182,33 @@ def ssh_peer() -> str | None:
     return None
 
 
+def local_addresses() -> list[str]:
+    """Every address configured on this machine's own interfaces.
+
+    Blocking one of these drops traffic the machine sends to itself over a real
+    interface, which is a quiet way to break local services.
+    """
+    if not shutil.which("ip"):
+        return []
+    try:
+        proc = subprocess.run(["ip", "-o", "addr", "show"],
+                              capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    found = []
+    for match in re.finditer(r"\binet6?\s+([0-9a-fA-F:.]+)/", proc.stdout or ""):
+        address = match.group(1)
+        if address not in found:
+            found.append(address)
+    return found
+
+
 def protected_addresses() -> dict[str, str]:
     """Addresses that must not be blocked casually, mapped to why."""
     protected: dict[str, str] = {}
+    for address in local_addresses():
+        protected.setdefault(address, "an address of this machine itself "
+                                      "- blocking it breaks local services")
     for address in default_gateways():
         protected.setdefault(address, "this machine's default gateway "
                                       "- blocking it cuts all connectivity")
