@@ -34,22 +34,50 @@ Three things it does that a packet list does not:
 
 ## Install
 
-**Raspberry Pi / Linux**
-
-```bash
-sudo apt install tshark python3-maxminddb
-git clone https://github.com/t0mbo192/netwatch.git
-cd netwatch && ./install-pi.sh
-```
-
-**Windows** — download `netwatch.exe` from
-[Releases](https://github.com/t0mbo192/netwatch/releases), or run from source
-with Python 3.10+. Either way you need
-[Wireshark](https://www.wireshark.org) installed, since netwatch reads packets
+Every route gives you a `netwatch` command on your PATH. All of them need
+[Wireshark](https://www.wireshark.org) installed, because netwatch reads packets
 with its `tshark`.
 
-Then fetch the database that turns addresses into organisation names (~10 MB,
-one time):
+**Linux and macOS**
+
+```bash
+git clone https://github.com/t0mbo192/netwatch.git
+cd netwatch && ./install.sh
+```
+
+Checks what you have, tells you the right command for anything missing (it never
+runs `sudo` itself), and installs a `netwatch` shim into `~/.local/bin`. Because
+the shim points at the clone, `git pull` updates the command. `./install.sh
+--uninstall` removes it; `--prefix DIR` puts it elsewhere.
+
+**Windows**
+
+```powershell
+git clone https://github.com/t0mbo192/netwatch.git
+cd netwatch; .\install.ps1
+```
+
+Installs to `%LOCALAPPDATA%\Programs\netwatch` and adds that to your **user**
+PATH — no administrator rights, nothing machine-wide. Open a new terminal
+afterwards. Use `.\install.ps1 -Exe .\netwatch.exe` to install a downloaded
+binary instead of running from source (no Python needed), and
+`.\install.ps1 -Uninstall` to remove both the command and the PATH entry.
+
+**With pip, on any platform**
+
+netwatch is a normal Python package, so if you would rather not use the scripts:
+
+```bash
+pipx install git+https://github.com/t0mbo192/netwatch.git
+```
+
+`pipx` is the safe choice — plain `pip install` into a system Python is blocked
+on Debian and Raspberry Pi OS ([PEP 668](https://peps.python.org/pep-0668/)).
+Add `[asn]` (`pipx install "netwatch[asn] @ git+..."`) to pull in `maxminddb`
+at the same time.
+
+**Then**, once installed, fetch the database that turns bare addresses into
+organisation names (~10 MB, one time):
 
 ```bash
 netwatch asn --fetch
@@ -87,6 +115,8 @@ Live capture needs privileges — run under `sudo`, or
 | [netwatch_core.py](netwatch_core.py) | Analysis — direction, host names, descriptions, live tracking. No terminal or display assumptions. |
 | [asn_lookup.py](asn_lookup.py) | Names the organisation behind an address, offline. |
 | [updater.py](updater.py) | Checks for a newer version. |
+| [install.sh](install.sh) / [install.ps1](install.ps1) | Installers for Linux/macOS and Windows. |
+| [pyproject.toml](pyproject.toml) | Package metadata, for the `pip`/`pipx` route. |
 
 Standard library only, apart from the optional `maxminddb`. No display, no web
 server, no daemon.
@@ -113,7 +143,8 @@ anything itself.
 
 | Install | Update |
 |---|---|
-| git clone (Pi) | `git pull`, then restart |
+| `install.sh` / `install.ps1` from a clone | `git pull` — the shim points at the clone |
+| `pipx` | `pipx upgrade netwatch` |
 | `netwatch.exe` | download the new one from Releases |
 
 Check any time with `netwatch update`.

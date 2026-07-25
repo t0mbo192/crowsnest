@@ -4,7 +4,7 @@
 
 # Windows-only files, which want CRLF.
 *.cmd text eol=crlf
-*.iss text eol=crlf
+*.ps1 text eol=crlf
 
 # Let git normalise text but leave these alone.
 *.png binary

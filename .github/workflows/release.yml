@@ -50,7 +50,12 @@ jobs:
           echo "Building version $file_version"
 
       - name: Install build tools
-        run: pip install --upgrade pyinstaller maxminddb
+        run: pip install --upgrade pyinstaller maxminddb build
+
+      # Also ship a wheel, so `pip install` works on Linux and macOS from the
+      # same release rather than only from a clone.
+      - name: Build wheel
+        run: python -m build --wheel --outdir dist
 
       - name: Smoke-test before packaging
         shell: bash
@@ -77,8 +82,10 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: netwatch-windows-${{ steps.version.outputs.file }}
-          path: dist/netwatch.exe
+          name: netwatch-${{ steps.version.outputs.file }}
+          path: |
+            dist/netwatch.exe
+            dist/*.whl
           if-no-files-found: error
 
       - name: Publish release

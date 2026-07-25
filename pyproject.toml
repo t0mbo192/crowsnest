@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "netwatch"
+description = "See which hosts a machine talks to, in plain language."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Tombo192" }]
+keywords = ["network", "monitoring", "pcap", "wireshark", "tshark", "cli"]
+dynamic = ["version"]
+
+# No "License ::" classifier: PEP 639 replaced those with the license field above.
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: System Administrators",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Topic :: System :: Networking :: Monitoring",
+]
+
+# Nothing is required to run: netwatch is standard library only. maxminddb is
+# what lets it name the organisation behind an address, so it is worth having.
+dependencies = []
+
+[project.optional-dependencies]
+asn = ["maxminddb>=2.0"]
+
+[project.urls]
+Homepage = "https://github.com/t0mbo192/netwatch"
+Issues = "https://github.com/t0mbo192/netwatch/issues"
+
+# Installing provides a `netwatch` command on PATH, on every platform.
+[project.scripts]
+netwatch = "netwatch:main"
+
+[tool.setuptools]
+# Flat modules rather than a package directory -- there are only five.
+py-modules = ["netwatch", "netwatch_core", "asn_lookup", "updater", "netwatch_version"]
+
+[tool.setuptools.dynamic]
+version = { attr = "netwatch_version.__version__" }
