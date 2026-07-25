@@ -6,7 +6,7 @@ Wireshark tells you everything; this tells you who. Every connection is split
 into outbound (this machine started it) and inbound (something else did), and
 each host is labelled with what it actually is rather than left as an address.
 
-    netwatch live -i eth0                  watch traffic as it happens
+    netwatch live -i eth0                  report each host once, as it appears
     netwatch read capture.pcapng           analyse a saved capture
     netwatch interfaces                    what can I capture on?
     netwatch asn --fetch                   get the database that names owners
@@ -163,9 +163,11 @@ def cmd_live(args) -> int:
     announced: set[tuple] = set()
     fatal = ""
 
-    if args.plain:
-        print(f"netwatch live on {args.interface} - this machine "
-              f"{', '.join(sorted(my_ips)) or '?'}. Ctrl-C to stop.\n", flush=True)
+    if not args.dashboard:
+        print(style(f"netwatch live{glyphs.sep}{args.interface}{glyphs.sep}"
+                    f"this machine {', '.join(sorted(my_ips)) or '?'}", Style.BOLD))
+        print(style("  each host is reported once, when first seen. "
+                    "Ctrl-C for a summary.\n", Style.DIM), flush=True)
 
     while not stop.is_set():
         try:
@@ -189,13 +191,20 @@ def cmd_live(args) -> int:
         last_draw = now
         rows, meta = tracker.snapshot(elapsed)
 
-        if args.plain:
+        if not args.dashboard:
+            # One line per host, the first time it is seen, and never again.
+            # Anything already reported stays reported -- no redrawing, no
+            # repetition, nothing moving on screen.
             for r in rows:
-                ident = (r["direction"], r["ip"])
-                if ident not in announced:
-                    announced.add(ident)
-                    word = "->" if r["direction"].startswith("out") else "<-"
-                    print(f"  {word} {r['site']:<44} {r['description']}", flush=True)
+                ident = (r["direction"], r["site"])
+                if ident in announced:
+                    continue
+                announced.add(ident)
+                outbound = r["direction"].startswith("out")
+                arrow = glyphs.out if outbound else glyphs.inb
+                line = (f"  {time.strftime('%H:%M:%S')}  {arrow}  "
+                        f"{r['site'][:42]:<42} {r['description']}")
+                print(style(line, Style.IN) if not outbound else line, flush=True)
             continue
 
         shown = rows if args.top <= 0 else rows[: args.top]
@@ -429,8 +438,9 @@ def build_parser() -> argparse.ArgumentParser:
                       help="capture filter, e.g. 'not port 22'")
     live.add_argument("--me", action="append", default=[], metavar="IP",
                       help="treat IP as this machine (repeatable)")
-    live.add_argument("--plain", action="store_true",
-                      help="log each new host instead of redrawing")
+    live.add_argument("--dashboard", action="store_true",
+                      help="show a continuously redrawn table with rates, "
+                           "instead of reporting each host once")
     shared(live)
     live.set_defaults(func=cmd_live)
 

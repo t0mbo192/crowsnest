@@ -412,6 +412,9 @@ def analyze(capture: str, resolve: bool = True) -> dict:
         })
     if resolve:
         fill_names(rows)
+    # Names are known by now, so several addresses for one host can be folded
+    # into a single entry.
+    rows = merge_by_host(rows)
     # Outbound first, then by bytes desc.
     rows.sort(key=lambda r: (r["direction"] != "outbound", -r["bytes"]))
     return {"packets": total, "my_ip": ", ".join(sorted(my_ips)), "rows": rows}
@@ -436,6 +439,33 @@ def make_text(capture: str, meta: dict, rows: list[dict]) -> str:
             L.append(f"          {r['description']}")
         L.append("")
     return "\n".join(L)
+
+
+def merge_by_host(rows: list[dict]) -> list[dict]:
+    """Combine entries that are the same host reached at different addresses.
+
+    A busy site answers on several addresses, so keying on the address alone
+    reports one host several times over -- github.com twice, the same name and
+    the same description, which reads as a duplicate because it is one. Rows are
+    keyed on the hostname where one is known, and on the address only when it is
+    not. The busiest address is kept as the representative, and "addresses"
+    records how many were folded in.
+    """
+    merged: dict[tuple[str, str], dict] = {}
+    for row in sorted(rows, key=lambda r: -r["bytes"]):
+        key = (row["direction"], row["name"] or row["ip"])
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = dict(row, addresses=1)
+            continue
+        existing["packets"] += row["packets"]
+        existing["bytes"] += row["bytes"]
+        if "rate" in existing:
+            existing["rate"] = existing.get("rate", 0.0) + row.get("rate", 0.0)
+        existing["addresses"] += 1
+    out = list(merged.values())
+    out.sort(key=lambda r: -r["bytes"])
+    return out
 
 
 def human_bytes(n: int) -> str:
@@ -647,7 +677,7 @@ class LiveTracker:
                     "bytes": conn["bytes"], "packets": conn["packets"],
                     "rate": delta / elapsed if elapsed > 0 else 0.0,
                     "local": local})
-            rows.sort(key=lambda r: -r["bytes"])
+            rows = merge_by_host(rows)
             mine = sorted(self.my_ips)
             extra = f" +{len(mine) - 2}" if len(mine) > 2 else ""
             meta = {"packets": self.packets, "bytes": self.bytes,
