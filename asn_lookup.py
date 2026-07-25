@@ -86,6 +86,11 @@ def search_paths() -> list[str]:
     here = os.path.dirname(os.path.abspath(
         sys.executable if getattr(sys, "frozen", False) else __file__))
     dirs = [data_dir(), legacy_data_dir(), here]
+    # Under sudo, HOME is /root, so also look where the real user keeps things.
+    invoker = invoking_user_home()
+    if invoker:
+        dirs[1:1] = [os.path.join(invoker, ".crowsnest"),
+                     os.path.join(invoker, ".netwatch")]
     if os.name == "nt":
         dirs.append(os.path.join(os.environ.get("PROGRAMDATA", r"C:\ProgramData"),
                                  "crowsnest"))
