@@ -1,4 +1,4 @@
-# Allowlist for analyze_capture.py
+# Allowlist for: netwatch read --allowlist allowlist.txt
 # One entry per line. '#' starts a comment. Entries can be:
 #   root domains      github.com          (matches api.github.com, www.github.com, ...)
 #   specific hosts    login.example.com

@@ -1,13 +1,13 @@
 name: Release
 
-# Pushing a version tag is the whole release process: this builds the Windows
-# app, wraps it in an installer, and publishes both to a GitHub Release.
+# Pushing a version tag is the whole release process: this builds a standalone
+# netwatch.exe and attaches it to a GitHub Release.
 #
 #   1. bump __version__ in netwatch_version.py
-#   2. commit, then:  git tag v1.0.1 && git push origin main --tags
+#   2. commit, then:  git tag v1.1.0 && git push origin main --tags
 #
-# The Raspberry Pi does not use these artifacts -- it runs from a git clone and
-# updates with `git pull`, since the app is pure Python and needs no build.
+# Linux and the Raspberry Pi do not use this artifact -- netwatch is pure Python
+# there, so a git clone plus `git pull` is the whole install and update story.
 
 on:
   push:
@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Build the installer but do not publish a release"
+        description: "Build but do not publish a release"
         type: boolean
         default: true
 
@@ -40,8 +40,8 @@ jobs:
           echo "file=$file_version" >> "$GITHUB_OUTPUT"
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             tag_version="${GITHUB_REF_NAME#v}"
-            # A tag that disagrees with the source would ship a mislabelled
-            # build, and the in-app update check would compare the wrong number.
+            # A tag disagreeing with the source would ship a mislabelled build,
+            # and the update check would then compare the wrong number.
             if [ "$tag_version" != "$file_version" ]; then
               echo "::error::Tag v$tag_version does not match netwatch_version.py ($file_version)"
               exit 1
@@ -50,31 +50,35 @@ jobs:
           echo "Building version $file_version"
 
       - name: Install build tools
-        run: pip install --upgrade pyinstaller
+        run: pip install --upgrade pyinstaller maxminddb
 
-      - name: Build application
-        run: >
-          python -m PyInstaller --onefile --windowed --name ConnectionViewer
-          --distpath dist --workpath build --specpath build
-          connection_viewer.py
-
-      - name: Install Inno Setup
-        run: choco install innosetup --no-progress -y
-
-      - name: Build installer
+      - name: Smoke-test before packaging
         shell: bash
         run: |
-          iscc="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
-          "$iscc" "/DAppVersion=${{ steps.version.outputs.file }}" packaging/netwatch.iss
-          ls -la dist/
+          python netwatch.py --version
+          python netwatch.py read example_traffic.pcapng --no-names --no-color --top 3
 
-      - name: Upload artifacts
+      # A console app, not windowed: netwatch is a terminal tool now.
+      # maxminddb is imported lazily inside a function, so name it explicitly
+      # rather than relying on static analysis to spot it.
+      - name: Build netwatch.exe
+        run: >
+          python -m PyInstaller --onefile --console --name netwatch
+          --hidden-import maxminddb
+          --distpath dist --workpath build --specpath build
+          netwatch.py
+
+      - name: Verify the binary runs
+        shell: bash
+        run: |
+          ./dist/netwatch.exe --version
+          ./dist/netwatch.exe read example_traffic.pcapng --no-names --no-color --top 3
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: netwatch-windows-${{ steps.version.outputs.file }}
-          path: |
-            dist/netwatch-setup-*.exe
-            dist/ConnectionViewer.exe
+          path: dist/netwatch.exe
           if-no-files-found: error
 
       - name: Publish release
@@ -83,9 +87,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version="${{ steps.version.outputs.file }}"
           gh release create "$GITHUB_REF_NAME" \
-            --title "netwatch $version" \
+            --title "netwatch ${{ steps.version.outputs.file }}" \
             --generate-notes \
-            "dist/netwatch-setup-$version.exe#netwatch installer (Windows)" \
-            "dist/ConnectionViewer.exe#Portable executable (Windows)"
+            "dist/netwatch.exe#netwatch.exe (Windows, standalone)"
