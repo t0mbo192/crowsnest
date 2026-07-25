@@ -57,11 +57,19 @@ jobs:
       - name: Build wheel
         run: python -m build --wheel --outdir dist
 
+      # The runner has no tshark, and captures are git-ignored for privacy, so
+      # there is nothing here to analyse. What this can prove is that the CLI
+      # imports cleanly and every subcommand is wired up.
       - name: Smoke-test before packaging
         shell: bash
         run: |
           python netwatch.py --version
-          python netwatch.py read example_traffic.pcapng --no-names --no-color --top 3
+          python netwatch.py --help > /dev/null
+          for sub in live read interfaces asn update; do
+            echo "checking: netwatch $sub --help"
+            python netwatch.py "$sub" --help > /dev/null
+          done
+          python -c "import netwatch, netwatch_core, asn_lookup, updater, netwatch_version"
 
       # A console app, not windowed: netwatch is a terminal tool now.
       # maxminddb is imported lazily inside a function, so name it explicitly
@@ -77,7 +85,16 @@ jobs:
         shell: bash
         run: |
           ./dist/netwatch.exe --version
-          ./dist/netwatch.exe read example_traffic.pcapng --no-names --no-color --top 3
+          ./dist/netwatch.exe --help > /dev/null
+          # maxminddb is imported lazily inside a function, so static analysis
+          # can miss it. If it did not get bundled, ASN names silently stop
+          # working in the released binary -- assert it is really in there.
+          status="$(./dist/netwatch.exe asn 2>&1 || true)"
+          echo "$status"
+          if echo "$status" | grep -qi "maxminddb is not installed"; then
+            echo "::error::maxminddb was not bundled into netwatch.exe"
+            exit 1
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
