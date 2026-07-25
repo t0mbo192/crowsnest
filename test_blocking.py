@@ -259,6 +259,21 @@ class TestPortability(unittest.TestCase):
             self.assertFalse(blocking.nft_available())
             self.assertIn("Linux", blocking.unsupported_reason())
 
+    def test_nft_found_in_sbin_when_not_on_path(self):
+        # Found on a real Pi: nftables was installed, but /usr/sbin is not on a
+        # non-root user's PATH on Debian, so which() alone reported it missing
+        # and the CLI told the user to install what they already had.
+        def exists(path):
+            return path == "/usr/sbin/nft"
+        with mock.patch("os.name", "posix"),              mock.patch.object(blocking.shutil, "which", return_value=None),              mock.patch("os.path.isfile", side_effect=exists),              mock.patch("os.access", return_value=True):
+            self.assertEqual(blocking.nft_path(), "/usr/sbin/nft")
+            self.assertTrue(blocking.nft_available())
+
+    def test_path_wins_over_sbin_fallback(self):
+        with mock.patch.object(blocking.shutil, "which",
+                               return_value="/usr/local/bin/nft"):
+            self.assertEqual(blocking.nft_path(), "/usr/local/bin/nft")
+
     def test_missing_nft_explains_how_to_install(self):
         with mock.patch("os.name", "posix"), \
              mock.patch.object(blocking, "nft_path", return_value=None):

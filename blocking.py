@@ -52,8 +52,21 @@ class BlockError(RuntimeError):
 
 
 # --------------------------------------------------------------- availability
+# sbin is where nft installs, and it is absent from a non-root user's PATH on
+# Debian, so a plain PATH search reports "not installed" on a machine where it
+# plainly is -- and then tells the user to install it again.
+NFT_FALLBACKS = ("/usr/sbin/nft", "/sbin/nft", "/usr/local/sbin/nft")
+
+
 def nft_path() -> str | None:
-    return shutil.which("nft")
+    """Where nft is, if it is installed at all."""
+    found = shutil.which("nft")
+    if found:
+        return found
+    for candidate in NFT_FALLBACKS:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
 
 
 def nft_available() -> bool:
