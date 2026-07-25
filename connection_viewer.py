@@ -520,7 +520,7 @@ class App:
                 name = names.get(r["ip"], "")
                 if name and not r["name"]:
                     r["name"] = r["site"] = name
-                    r["description"] = describe(name, r["local"])
+                    r["description"] = describe(name, r["local"], r["ip"])
                     found += 1
             if found:
                 self.refresh()

@@ -38,6 +38,23 @@ fi
 say "tshark found       : $(command -v tshark)"
 say "python3 + tkinter  : ok"
 
+# Optional: ASN lookups turn bare IP addresses into organisation names. netwatch
+# works without this, those hosts just read "Unknown host".
+if python3 -c "import maxminddb" >/dev/null 2>&1; then
+    if python3 -c "
+import sys; sys.path.insert(0, '$REPO_DIR')
+import asn_lookup; sys.exit(0 if asn_lookup.available() else 1)" >/dev/null 2>&1; then
+        say "ASN database       : ok"
+    else
+        say "ASN database       : missing - names for bare IPs will be unavailable"
+        say "        fetch it with:  python3 $REPO_DIR/asn_lookup.py --fetch"
+    fi
+else
+    say "maxminddb          : not installed (optional)"
+    say "        for organisation names:  sudo apt install python3-maxminddb"
+    say "        then:                    python3 $REPO_DIR/asn_lookup.py --fetch"
+fi
+
 # Reading captures as a non-root user needs membership of the wireshark group.
 # Only relevant for live capture; opening saved files works either way.
 if getent group wireshark >/dev/null 2>&1; then

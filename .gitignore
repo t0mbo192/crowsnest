@@ -22,3 +22,8 @@ gdid_regen.ps1
 # OS cruft
 .DS_Store
 Thumbs.db
+
+# ASN databases -- large, and redistribution is restricted by their licences.
+# Fetch one with: python asn_lookup.py --fetch
+*.mmdb
+*.mmdb.gz

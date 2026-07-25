@@ -30,6 +30,7 @@ whoever sends the opening SYN started the connection.
 | `netwatch_live.py` | **Live terminal view** — watch connections form in real time, no display needed. Works over SSH on a headless Pi. |
 | `connection_viewer.py` | **Desktop app** with dark and light themes: a sortable, filterable table of inbound/outbound connections, each host tagged with a plain-English description. Builds into a standalone `.exe`. |
 | `netwatch_core.py` | Shared analysis: direction, host names, descriptions. No GUI imports, so it works headless. |
+| `asn_lookup.py` | Names the organisation behind an address, offline, so bare IPs stop reading "Unknown host". |
 | `analyze_capture.py` | CLI: hosts grouped by root domain, allowlist flagging, optional GeoIP, CSV export. |
 | `pcap_report.py` | Prints a simple two-section (outbound / inbound) text report. |
 | `analyze_gui.py` | An earlier, fuller GUI (allowlist, GeoIP, flagged-only). |
@@ -42,8 +43,22 @@ whoever sends the opening SYN started the connection.
 - **Tkinter**, for the GUI. It ships with Python on Windows and macOS; on
   Debian / Raspberry Pi OS install it with `sudo apt install python3-tk`.
 
-No third-party Python packages are required — everything runs on the standard
-library, which keeps installation on a Raspberry Pi to the two `apt` lines above.
+Optional, but strongly recommended:
+
+- **`maxminddb`** plus an ASN database, which is what lets netwatch name the
+  organisation behind an address that has no hostname. Without it those rows read
+  "Unknown host"; with it they read "Google LLC" or "Anthropic, PBC". Lookups are
+  local — no address ever leaves the machine.
+
+```bash
+sudo apt install python3-maxminddb     # or: pip install maxminddb
+python asn_lookup.py --fetch           # downloads ~10 MB into ~/.netwatch/
+python asn_lookup.py 8.8.8.8           # check it works
+```
+
+netwatch also picks up an existing `GeoLite2-ASN.mmdb`, and honours
+`NETWATCH_ASN_DB=/path/to/db.mmdb`. Everything degrades quietly if the library or
+database is missing.
 
 ## Usage
 
@@ -179,4 +194,14 @@ built-in keyword table — nothing leaves your machine unless you explicitly pas
 
 ## License
 
-[MIT](LICENSE)
+netwatch itself is [MIT](LICENSE).
+
+The optional ASN database is not part of this repository and is not redistributed
+by it — `asn_lookup.py --fetch` downloads it from the publisher. If you use
+DB-IP's IP-to-ASN Lite database, their licence requires attribution:
+
+> IP-to-ASN data by [DB-IP](https://db-ip.com) — licensed under
+> [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+MaxMind's GeoLite2-ASN works as an alternative and carries its own
+[end-user licence](https://www.maxmind.com/en/geolite2/eula).

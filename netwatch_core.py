@@ -24,16 +24,15 @@ import threading
 import time
 from collections import defaultdict
 
+import asn_lookup
+
 # Hide the console window tshark would otherwise flash on Windows.
 _NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 socket.setdefaulttimeout(2)  # keep reverse-DNS snappy
 
+# Folder scanned for the newest capture when a front end is opened with no file.
 DROP_DIR = os.path.join(os.path.expanduser("~"), "Documents", "Captures")
-# Hide the console window tshark would otherwise flash on Windows.
-_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
-
-socket.setdefaulttimeout(2)  # keep reverse-DNS snappy
 
 FIELDS = [
     "ip.src", "ip.dst", "ipv6.src", "ipv6.dst",
@@ -122,13 +121,25 @@ DESCRIPTIONS = [
 ]
 
 
-def describe(host: str, local: bool) -> str:
+def describe(host: str, local: bool, ip: str = "") -> str:
+    """Say what a host is, in plain language.
+
+    The keyword table comes first because it describes what a host is *for* --
+    "Datadog - monitoring / telemetry" is more use than the name of whoever owns
+    the address range. ASN data then covers everything the table misses, which is
+    most of the internet, and is the only thing that can name an address with no
+    hostname at all. Both are optional: with neither, this degrades to the
+    generic labels it always used.
+    """
     h = (host or "").lower()
     for needle, desc in DESCRIPTIONS:
         if needle in h:
             return desc
     if local:
         return "Local network device"
+    org = asn_lookup.organisation(ip) if ip else ""
+    if org:
+        return org
     if not host:
         return "Unknown host (no name)"
     return "Website / service"
@@ -241,7 +252,7 @@ def fill_names(rows: list[dict], budget: float = 8.0) -> bool:
         name = names.get(r["ip"], "")
         if name and not r["name"]:
             r["name"] = r["site"] = name
-            r["description"] = describe(name, r["local"])
+            r["description"] = describe(name, r["local"], r["ip"])
             changed = True
     return changed
 
@@ -351,7 +362,7 @@ def analyze(capture: str, resolve: bool = True) -> dict:
         local = is_private(ip)
         rows.append({
             "direction": direction, "site": name or ip, "ip": ip, "name": name,
-            "description": describe(name, local),
+            "description": describe(name, local, ip),
             "packets": a["packets"], "bytes": a["bytes"], "local": local,
         })
     if resolve:

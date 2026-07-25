@@ -252,7 +252,7 @@ class LiveTracker:
                 rows.append({
                     "direction": conn["direction"],
                     "site": name or conn["ip"], "ip": conn["ip"],
-                    "description": describe(name, local),
+                    "description": describe(name, local, conn["ip"]),
                     "bytes": conn["bytes"], "packets": conn["packets"],
                     "rate": delta / elapsed if elapsed > 0 else 0.0,
                     "idle": time.monotonic() - conn["last"]})
