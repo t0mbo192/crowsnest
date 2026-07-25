@@ -33,12 +33,20 @@ fail() { printf '\n[!] %s\n' "$1" >&2; exit 1; }
 TARGET="${BIN_DIR}/crowsnest"
 
 if [ "$UNINSTALL" = 1 ]; then
+    # The desktop launcher belongs to the invoking user, not to root, when this
+    # is re-run under sudo to remove a command installed system-wide.
+    uhome="${SUDO_USER:+$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)}"
+    launcher="${uhome:-$HOME}/.local/share/applications/crowsnest.desktop"
+    if [ -e "$launcher" ]; then
+        rm -f "$launcher"
+        printf '\nRemoved %s\n' "$launcher"
+    fi
     if [ -e "$TARGET" ]; then
         rm -f "$TARGET"
-        printf '\nRemoved %s\n' "$TARGET"
+        printf 'Removed %s\n' "$TARGET"
         printf 'The clone at %s is untouched; delete it if you want it gone.\n\n' "$REPO_DIR"
     else
-        printf '\nNothing to remove at %s\n\n' "$TARGET"
+        printf 'Nothing to remove at %s\n\n' "$TARGET"
     fi
     exit 0
 fi
