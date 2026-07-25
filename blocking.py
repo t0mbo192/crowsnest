@@ -43,7 +43,19 @@ CHAIN = "input"
 # Slightly ahead of the usual filter hook, so a drop lands before other accepts.
 CHAIN_SPEC = "type filter hook input priority -10 ; policy accept ;"
 
-RECORD_DIR = os.path.join(os.path.expanduser("~"), ".crowsnest")
+def _record_dir() -> str:
+    """Where recorded blocks live.
+
+    Blocking needs root, so this normally runs under sudo where HOME is /root.
+    Recording under the invoking user's home instead keeps one list, rather than
+    root and the user each seeing a different one.
+    """
+    from asn_lookup import invoking_user_home
+    home = invoking_user_home() or os.path.expanduser("~")
+    return os.path.join(home, ".crowsnest")
+
+
+RECORD_DIR = _record_dir()
 RECORD_PATH = os.path.join(RECORD_DIR, "blocks.json")
 
 

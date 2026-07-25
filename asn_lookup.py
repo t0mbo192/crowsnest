@@ -48,6 +48,24 @@ _cache: dict[str, tuple[int, str] | None] = {}
 _status = "not initialised"
 
 
+def invoking_user_home() -> str | None:
+    """Home of the user who called sudo, when we are running under it.
+
+    Live capture and blocking both need root, so crowsnest normally runs under
+    sudo -- where HOME is /root and a database sitting in the real user's home
+    is invisible. Without this, the naming that was just set up silently stops
+    working the moment it is used the way it is meant to be used.
+    """
+    user = os.environ.get("SUDO_USER")
+    if not user or user == "root":
+        return None
+    try:
+        import pwd
+        return pwd.getpwnam(user).pw_dir
+    except (ImportError, KeyError):
+        return None
+
+
 def data_dir() -> str:
     """Where crowsnest keeps its own files."""
     return os.path.join(os.path.expanduser("~"), ".crowsnest")
@@ -108,8 +126,12 @@ def _open() -> object | None:
     path = find_database()
     if not path:
         _reader = False
-        _status = ("no ASN database found — run `python asn_lookup.py --fetch` "
-                   f"or put one in {data_dir()}")
+        # Name a directory that is actually useful: under sudo, data_dir() is
+        # /root/.crowsnest, which is not where anyone would want to put it.
+        where = invoking_user_home()
+        target = os.path.join(where, ".crowsnest") if where else data_dir()
+        _status = ("no ASN database found - run `crowsnest asn --fetch` "
+                   f"or put one in {target}")
         return None
     try:
         _reader = maxminddb.open_database(path)
