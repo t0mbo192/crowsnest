@@ -340,7 +340,8 @@ def print_report(r: Report, do_rdns: bool, geo: dict[str, str],
         tag = ""
         if has_allowlist:
             tag = "  [OK]" if not not_ok else f"  [FLAGGED: {len(not_ok)} not allowed]"
-        print(f"\n  {root}  ({g['count']} hits){tag}")
+        hits = g["count"]
+        print(f"\n  {root}  ({hits} hit{'' if hits == 1 else 's'}){tag}")
         for h, c in display_subs:
             mark = "  <-- not in allowlist" if h in not_ok else ""
             srcs = ", ".join(sorted(r.host_source[h]))

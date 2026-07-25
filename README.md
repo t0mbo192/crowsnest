@@ -13,6 +13,8 @@ Wireshark shows you *everything*; that's the problem. `netwatch` distills a
   local device …)
 - **Filtering** by text or direction
 
+![netwatch](docs/screenshot.png)
+
 It reads captures with `tshark` (bundled with Wireshark), works out which machine
 is "you" from the traffic, and decides direction from the TCP handshake —
 whoever sends the opening SYN started the connection.
@@ -25,7 +27,7 @@ whoever sends the opening SYN started the connection.
 
 | File | What it is |
 |------|-----------|
-| `connection_viewer.py` | **The main app** — a desktop GUI: a sortable, filterable table of inbound/outbound connections, each host tagged with a plain-English description. Builds into a standalone `.exe`. |
+| `connection_viewer.py` | **The main app** — a desktop GUI with dark and light themes: a sortable, filterable table of inbound/outbound connections, each host tagged with a plain-English description. Builds into a standalone `.exe`. |
 | `analyze_capture.py` | CLI: hosts grouped by root domain, allowlist flagging, optional GeoIP, CSV export. Headless-friendly. |
 | `pcap_report.py` | Prints a simple two-section (outbound / inbound) text report. |
 | `analyze_gui.py` | An earlier, fuller GUI (allowlist, GeoIP, flagged-only). |
@@ -35,6 +37,11 @@ whoever sends the opening SYN started the connection.
 - **Wireshark**, which provides `tshark` — <https://www.wireshark.org>.
   On Debian / Raspberry Pi OS: `sudo apt install tshark`
 - **Python 3.10+** (only to run from source or rebuild the `.exe`)
+- **Tkinter**, for the GUI. It ships with Python on Windows and macOS; on
+  Debian / Raspberry Pi OS install it with `sudo apt install python3-tk`.
+
+No third-party Python packages are required — everything runs on the standard
+library, which keeps installation on a Raspberry Pi to the two `apt` lines above.
 
 ## Usage
 
@@ -61,11 +68,23 @@ python -m PyInstaller --onefile --windowed --name ConnectionViewer connection_vi
 
 ## Running on a Raspberry Pi
 
-The intended deployment is a Pi acting as a network monitor. Install `tshark`
-(`sudo apt install tshark`). On a **headless** Pi, use the command-line tools —
-`analyze_capture.py` and `pcap_report.py` print to the console and need no
-display. (The GUI needs a desktop / X session.) A headless build of the
-direction + descriptions view is a natural next step.
+The intended deployment is a Pi acting as a network monitor on an attached
+display:
+
+```bash
+sudo apt install tshark python3-tk
+git clone https://github.com/t0mbo192/netwatch.git
+cd netwatch
+python3 connection_viewer.py
+```
+
+The dark theme is the default, which suits an always-on monitor, and the stat
+cards are sized to read from across a room. Your theme choice is remembered in
+`~/.netwatch.json`.
+
+On a **headless** Pi, use the command-line tools instead — `analyze_capture.py`
+and `pcap_report.py` print to the console and need no display. A headless build
+of the direction + descriptions view is a natural next step.
 
 ## Privacy
 
