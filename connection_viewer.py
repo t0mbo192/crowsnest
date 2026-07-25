@@ -23,10 +23,13 @@ from __future__ import annotations
 import glob
 import ipaddress
 import os
+import queue
 import shutil
 import socket
 import subprocess
 import sys
+import threading
+import time
 from collections import defaultdict
 
 import tkinter as tk
@@ -190,13 +193,65 @@ def is_private(ip: str) -> bool:
 _rdns_cache: dict[str, str] = {}
 
 
-def rdns(ip: str) -> str:
-    if ip not in _rdns_cache:
-        try:
-            _rdns_cache[ip] = socket.gethostbyaddr(ip)[0].lower()
-        except OSError:
-            _rdns_cache[ip] = ""
-    return _rdns_cache[ip]
+def resolve_many(ips, budget: float = 8.0, workers: int = 16) -> dict[str, str]:
+    """Reverse-DNS a batch of IPs at once, giving up after `budget` seconds.
+
+    socket.gethostbyaddr() goes through the system resolver, which ignores
+    socket.setdefaulttimeout() -- one address with no working PTR server can
+    stall for ~9s. Serially that adds up to a frozen app, so the lookups run in
+    parallel daemon threads under a single overall deadline. Anything that
+    doesn't answer in time is cached as a miss and simply stays an IP address.
+    """
+    todo = [ip for ip in dict.fromkeys(ips) if ip and ip not in _rdns_cache]
+    if todo:
+        work: queue.Queue = queue.Queue()
+        for ip in todo:
+            work.put(ip)
+        found: dict[str, str] = {}
+        lock = threading.Lock()
+
+        def drain() -> None:
+            while True:
+                try:
+                    ip = work.get_nowait()
+                except queue.Empty:
+                    return
+                try:
+                    name = socket.gethostbyaddr(ip)[0].lower()
+                except OSError:
+                    name = ""
+                with lock:
+                    found[ip] = name
+
+        threads = [threading.Thread(target=drain, daemon=True)
+                   for _ in range(min(workers, len(todo)))]
+        for t in threads:
+            t.start()
+        deadline = time.monotonic() + budget
+        for t in threads:
+            t.join(max(0.0, deadline - time.monotonic()))
+        with lock:
+            _rdns_cache.update(found)
+        # Cache the ones that never came back so we don't retry them every load.
+        for ip in todo:
+            _rdns_cache.setdefault(ip, "")
+    return {ip: _rdns_cache.get(ip, "") for ip in ips}
+
+
+def fill_names(rows: list[dict], budget: float = 8.0) -> bool:
+    """Fill in rows we only have an IP for. True if any name was found."""
+    unknown = [r["ip"] for r in rows if not r["name"]]
+    if not unknown:
+        return False
+    names = resolve_many(unknown, budget=budget)
+    changed = False
+    for r in rows:
+        name = names.get(r["ip"], "")
+        if name and not r["name"]:
+            r["name"] = r["site"] = name
+            r["description"] = describe(name, r["local"])
+            changed = True
+    return changed
 
 
 class _Flow:
@@ -210,7 +265,12 @@ class _Flow:
         self.locked = False
 
 
-def analyze(capture: str) -> dict:
+def analyze(capture: str, resolve: bool = True) -> dict:
+    """Dissect a capture into direction-split connections.
+
+    resolve=False skips reverse-DNS entirely, which keeps this fast (~1s); the
+    GUI uses that, then fills names in afterwards on a background thread.
+    """
     output = run_tshark(find_tshark(), capture)
     flows: dict[tuple, _Flow] = {}
     ip_hits: dict[str, int] = defaultdict(int)
@@ -292,18 +352,18 @@ def analyze(capture: str) -> dict:
 
     rows = []
     for (direction, ip), a in agg.items():
-        if a["hostnames"]:
-            name = sorted(a["hostnames"])[0]
-        elif ip in ip_to_name:
-            name = ip_to_name[ip]
-        else:
-            name = rdns(ip)
+        # Names known from the capture itself (TLS SNI / HTTP Host / DNS answers).
+        # Anything still unnamed is left to fill_names(), which is slow enough
+        # that the GUI runs it separately once the table is already on screen.
+        name = sorted(a["hostnames"])[0] if a["hostnames"] else ip_to_name.get(ip, "")
         local = is_private(ip)
         rows.append({
-            "direction": direction, "site": name or ip, "ip": ip,
+            "direction": direction, "site": name or ip, "ip": ip, "name": name,
             "description": describe(name, local),
             "packets": a["packets"], "bytes": a["bytes"], "local": local,
         })
+    if resolve:
+        fill_names(rows)
     # Outbound first, then by bytes desc.
     rows.sort(key=lambda r: (r["direction"] != "outbound", -r["bytes"]))
     return {"packets": total, "my_ip": ", ".join(sorted(my_ips)), "rows": rows}
@@ -340,6 +400,8 @@ class App:
         self.meta: dict = {}
         self.all_rows: list[dict] = []
         self._sort = {}
+        self.q: queue.Queue = queue.Queue()
+        self._busy = False
 
         root.title("Connection Viewer")
         root.geometry("1000x640")
@@ -348,9 +410,7 @@ class App:
         self._build_toolbar()
         self._build_filterbar()
         self._build_table()
-        self.status = ttk.Label(root, text="Open a capture to begin.",
-                                anchor="w", padding=(10, 3))
-        self.status.pack(fill="x", side="bottom")
+        self._build_statusbar()
 
         if initial:
             self.load(initial)
@@ -360,6 +420,9 @@ class App:
         bar.pack(fill="x")
         ttk.Button(bar, text="Open Capture…", command=self.choose).pack(side="left")
         ttk.Button(bar, text="Export…", command=self.export).pack(side="left", padx=(6, 0))
+        self.resolve_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(bar, text="Look up host names",
+                        variable=self.resolve_var).pack(side="left", padx=(12, 0))
         self.info = ttk.Label(bar, text="", foreground="#555")
         self.info.pack(side="left", padx=(12, 0))
 
@@ -411,26 +474,96 @@ class App:
         if path:
             self.load(path)
 
+    def _build_statusbar(self):
+        bar = ttk.Frame(self.root)
+        bar.pack(fill="x", side="bottom")
+        self.status = ttk.Label(bar, text="Open a capture to begin.",
+                                anchor="w", padding=(10, 3))
+        self.status.pack(side="left", fill="x", expand=True)
+        self.progress = ttk.Progressbar(bar, mode="indeterminate", length=160)
+        self.progress.pack(side="right", padx=8, pady=3)
+
     def load(self, path: str):
+        """Kick off analysis on a background thread so the window stays live."""
         if not os.path.isfile(path):
             messagebox.showerror("Open capture", f"No such file:\n{path}")
             return
-        self.status.config(text=f"Analyzing {os.path.basename(path)} …")
-        self.root.update_idletasks()
-        try:
-            meta = analyze(path)
-        except Exception as e:
-            messagebox.showerror("Analysis failed", str(e))
-            self.status.config(text="Ready")
+        if self._busy:
             return
         self.capture = path
-        self.meta = meta
-        self.all_rows = meta["rows"]
-        self.info.config(
-            text=f"{os.path.basename(path)}   ·   you = {meta['my_ip'] or '?'}"
-                 f"   ·   {meta['packets']} packets")
-        self.refresh()
-        self.status.config(text="Ready")
+        self._set_busy(True, f"Reading {os.path.basename(path)} …")
+        threading.Thread(target=self._parse_worker, args=(path,),
+                         daemon=True).start()
+        self.root.after(80, self._poll)
+
+    # Workers run off the main thread and only ever hand results to the queue --
+    # every widget and row update happens back in _poll on the main thread.
+    def _parse_worker(self, path: str):
+        try:
+            self.q.put(("parsed", analyze(path, resolve=False)))
+        except Exception as e:
+            self.q.put(("error", str(e) or e.__class__.__name__))
+
+    def _names_worker(self, ips: list[str]):
+        try:
+            self.q.put(("names", resolve_many(ips)))
+        except Exception:
+            self.q.put(("names", {}))
+
+    def _poll(self):
+        try:
+            msg = self.q.get_nowait()
+        except queue.Empty:
+            self.root.after(80, self._poll)
+            return
+
+        kind = msg[0]
+        if kind == "error":
+            self._set_busy(False)
+            messagebox.showerror("Analysis failed", msg[1])
+            return
+
+        if kind == "parsed":
+            self.meta = msg[1]
+            self.all_rows = self.meta["rows"]
+            self.info.config(
+                text=f"{os.path.basename(self.capture)}   ·   "
+                     f"you = {self.meta['my_ip'] or '?'}   ·   "
+                     f"{self.meta['packets']} packets")
+            self.refresh()   # table is usable now; names arrive next
+            unresolved = [r["ip"] for r in self.all_rows if not r["name"]]
+            if unresolved and self.resolve_var.get():
+                self.status.config(
+                    text=f"Looking up {len(unresolved)} host name(s) …")
+                threading.Thread(target=self._names_worker, args=(unresolved,),
+                                 daemon=True).start()
+                self.root.after(80, self._poll)
+            else:
+                self._set_busy(False)
+            return
+
+        if kind == "names":
+            names = msg[1]
+            found = 0
+            for r in self.all_rows:
+                name = names.get(r["ip"], "")
+                if name and not r["name"]:
+                    r["name"] = r["site"] = name
+                    r["description"] = describe(name, r["local"])
+                    found += 1
+            if found:
+                self.refresh()
+            self._set_busy(False)
+
+    def _set_busy(self, busy: bool, text: str | None = None):
+        self._busy = busy
+        if text:
+            self.status.config(text=text)
+        if busy:
+            self.progress.start(12)
+        else:
+            self.progress.stop()
+            self.status.config(text="Ready")
 
     def _clear_filter(self):
         self.filter_var.set("")
