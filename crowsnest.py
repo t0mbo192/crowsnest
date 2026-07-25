@@ -171,8 +171,10 @@ def cmd_live(args) -> int:
     fatal = ""
 
     if not args.dashboard:
+        # Same loopback filtering the summary uses, so the two agree.
+        shown_ips = sorted(a for a in my_ips if not a.startswith(("127.", "::1")))
         print(style(f"crowsnest live{glyphs.sep}{args.interface}{glyphs.sep}"
-                    f"this machine {', '.join(sorted(my_ips)) or '?'}", Style.BOLD))
+                    f"this machine {', '.join(shown_ips) or '?'}", Style.BOLD))
         print(style("  each host is reported once, when first seen. "
                     "Ctrl-C for a summary.\n", Style.DIM), flush=True)
 
