@@ -69,7 +69,7 @@ jobs:
             echo "checking: crowsnest $sub --help"
             python crowsnest.py "$sub" --help > /dev/null
           done
-          python -c "import crowsnest, crowsnest_core, asn_lookup, updater, crowsnest_version"
+          python -c "import crowsnest, crowsnest_core, crowsnest_banner, asn_lookup, updater, crowsnest_version"
 
       # A console app, not windowed: crowsnest is a terminal tool now.
       # maxminddb is imported lazily inside a function, so name it explicitly

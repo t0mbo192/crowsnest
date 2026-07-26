@@ -35,6 +35,7 @@ import sys
 import threading
 import time
 
+import crowsnest_banner as mark
 import crowsnest_core as core
 from crowsnest_version import __version__
 
@@ -148,6 +149,17 @@ def logo_lines(unicode_safe: bool, style: Style) -> list[str]:
     return [style(text, tint[part]) for text, part in zip(art, LOGO_PARTS)]
 
 
+def banner_lines(style: Style) -> list[str]:
+    """The wide mark that spells the name, nest picked out from the lettering.
+
+    Drawn in plain ASCII, so unlike the small mark it needs no fallback -- it
+    comes out the same on a legacy Windows console as on a modern terminal.
+    """
+    return [style(line[:mark.MARK_COLS], Style.OUT) +
+            style(line[mark.MARK_COLS:], Style.BOLD)
+            for line in mark.BANNER.split("\n")]
+
+
 # -------------------------------------------------------------------- panels
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -219,17 +231,28 @@ def render_dashboard(rows: list[dict], meta: dict, glyphs: Glyphs, style: Style,
         f"{core.human_bytes(meta.get('bytes', 0))}",
         f"this machine {meta.get('my_ips') or '?'}",
     ]
-    art = logo_lines(glyphs.unicode, style)
+    # The wide mark spells the name itself, so it needs only the tagline beside
+    # it. It wants 45 columns though, and on a narrow terminal the facts beside
+    # it would run off the edge -- there the small mark and a written name are
+    # used instead.
+    if width >= mark.WIDTH + max(len(f) for f in facts) + 4:
+        art = banner_lines(style)
+        captions = [style(f"v{__version__}   network lookout", Style.DIM)]
+    else:
+        art = logo_lines(glyphs.unicode, style)
+        captions = [style("CROWSNEST", Style.BOLD) +
+                    style("   network lookout", Style.DIM)]
+    captions += facts
+
+    # The mark's lines are ragged, so each is padded out to the widest before
+    # the captions go beside it, or the right-hand column would not line up.
+    pad = max(visible_len(line) for line in art)
     header = []
     for i, line in enumerate(art):
-        # Line 0 carries the name; the rest carry a fact each, and any spare
-        # logo lines simply have nothing beside them.
-        if i == 0:
-            right = (style("CROWSNEST", Style.BOLD) +
-                     style("   network lookout", Style.DIM))
-        else:
-            right = facts[i - 1] if i - 1 < len(facts) else ""
-        header.append(f" {line}  {right}")
+        # One caption per line of art. Spare lines of art simply have nothing
+        # beside them; spare captions are dropped rather than left to overflow.
+        right = captions[i] if i < len(captions) else ""
+        header.append(f" {line}{' ' * (pad - visible_len(line))}  {right}".rstrip())
 
     outbound = [r for r in rows if r["direction"].startswith("out")]
     inbound = [r for r in rows if not r["direction"].startswith("out")]
