@@ -111,23 +111,24 @@ class TestResolveTarget(unittest.TestCase):
 class TestGuardrails(unittest.TestCase):
     def test_gateway_is_protected(self):
         with mock.patch.object(blocking, "default_gateways",
-                               return_value=["192.168.0.1"]), \
+                               return_value=["192.168.1.1"]), \
              mock.patch.object(blocking, "dns_servers", return_value=[]), \
              mock.patch.object(blocking, "ssh_peer", return_value=None),              mock.patch.object(blocking, "local_addresses", return_value=[]):
-            problems = blocking.check_targets(["192.168.0.1", "203.0.113.5"])
-        self.assertIn("192.168.0.1", problems)
-        self.assertIn("gateway", problems["192.168.0.1"])
+            problems = blocking.check_targets(["192.168.1.1", "203.0.113.5"])
+        self.assertIn("192.168.1.1", problems)
+        self.assertIn("gateway", problems["192.168.1.1"])
         self.assertNotIn("203.0.113.5", problems)
 
     def test_dns_server_is_protected(self):
-        # The user's Pi-hole is their DNS: blocking it breaks the whole network.
+        # On a box that serves DNS for a network -- a Pi-hole, say -- blocking
+        # the resolver takes name resolution down for everything, not just here.
         with mock.patch.object(blocking, "default_gateways", return_value=[]), \
              mock.patch.object(blocking, "dns_servers",
-                               return_value=["192.168.0.50"]), \
+                               return_value=["192.168.1.50"]), \
              mock.patch.object(blocking, "ssh_peer", return_value=None),              mock.patch.object(blocking, "local_addresses", return_value=[]):
-            problems = blocking.check_targets(["192.168.0.50"])
-        self.assertIn("192.168.0.50", problems)
-        self.assertIn("DNS", problems["192.168.0.50"])
+            problems = blocking.check_targets(["192.168.1.50"])
+        self.assertIn("192.168.1.50", problems)
+        self.assertIn("DNS", problems["192.168.1.50"])
 
     def test_ssh_peer_is_protected(self):
         with mock.patch.object(blocking, "default_gateways", return_value=[]), \
@@ -145,7 +146,7 @@ class TestGuardrails(unittest.TestCase):
         practice. The peer must still be found with the environment empty.
         """
         established = ("  sl  local_address rem_address   st\n"
-                       "   0: 3200A8C0:0016 7800A8C0:E1D1 01\n")
+                       "   0: 3201A8C0:0016 7801A8C0:E1D1 01\n")
 
         def fake_open(path, *args, **kwargs):
             if path == "/proc/net/tcp":
@@ -157,46 +158,46 @@ class TestGuardrails(unittest.TestCase):
              mock.patch.object(blocking, "_parent_of", return_value=None), \
              mock.patch("builtins.open", side_effect=fake_open):
             peers = blocking.ssh_peers()
-        # 3200A8C0 = 192.168.0.50 port 22; 7800A8C0 = 192.168.0.120
-        self.assertEqual(peers, ["192.168.0.120"])
+        # 3201A8C0 = 192.168.1.50 port 22; 7801A8C0 = 192.168.1.120
+        self.assertEqual(peers, ["192.168.1.120"])
 
     def test_ssh_peer_found_via_parent_process_environment(self):
         """Under sudo our own environ is bare, but the shell above it is not."""
         with mock.patch.dict("os.environ", {}, clear=True), \
              mock.patch.object(blocking, "_environ_of",
                                return_value={"SSH_CONNECTION":
-                                             "192.168.0.120 5 192.168.0.50 22"}), \
+                                             "192.168.1.120 5 192.168.1.50 22"}), \
              mock.patch.object(blocking, "_parent_of", return_value=None), \
              mock.patch.object(blocking, "_peers_from_established_ssh",
                                return_value=[]):
-            self.assertEqual(blocking.ssh_peers(), ["192.168.0.120"])
+            self.assertEqual(blocking.ssh_peers(), ["192.168.1.120"])
 
     def test_proc_net_tcp_address_decoding(self):
         # Stored little-endian per 4-byte word, which is easy to get backwards.
-        self.assertEqual(blocking._hex_to_address("3200A8C0"), "192.168.0.50")
+        self.assertEqual(blocking._hex_to_address("3201A8C0"), "192.168.1.50")
         self.assertEqual(blocking._hex_to_address("0100007F"), "127.0.0.1")
 
     def test_own_address_is_protected(self):
         # Found on a real Pi: the machine's own LAN address was allowed through.
         with mock.patch.object(blocking, "default_gateways", return_value=[]),              mock.patch.object(blocking, "dns_servers", return_value=[]),              mock.patch.object(blocking, "ssh_peer", return_value=None),              mock.patch.object(blocking, "local_addresses",
-                               return_value=["192.168.0.50"]):
-            problems = blocking.check_targets(["192.168.0.50", "203.0.113.5"])
-        self.assertIn("192.168.0.50", problems)
-        self.assertIn("this machine itself", problems["192.168.0.50"])
+                               return_value=["192.168.1.50"]):
+            problems = blocking.check_targets(["192.168.1.50", "203.0.113.5"])
+        self.assertIn("192.168.1.50", problems)
+        self.assertIn("this machine itself", problems["192.168.1.50"])
         self.assertNotIn("203.0.113.5", problems)
 
     def test_local_addresses_parses_ip_output(self):
         # Real `ip -o addr show` output from the Raspberry Pi.
         sample = (
             "1: lo    inet 127.0.0.1/8 scope host lo\\       valid_lft forever\n"
-            "2: eth0    inet 192.168.0.50/24 brd 192.168.0.255 scope global eth0\n"
+            "2: eth0    inet 192.168.1.50/24 brd 192.168.1.255 scope global eth0\n"
             "2: eth0    inet6 fe80::1/64 scope link \\       valid_lft forever\n"
         )
         with mock.patch.object(blocking.shutil, "which", return_value="/sbin/ip"), \
              mock.patch("subprocess.run",
                         return_value=subprocess.CompletedProcess([], 0, sample, "")):
             found = blocking.local_addresses()
-        self.assertEqual(found, ["127.0.0.1", "192.168.0.50", "fe80::1"])
+        self.assertEqual(found, ["127.0.0.1", "192.168.1.50", "fe80::1"])
 
     def test_loopback_is_protected(self):
         with mock.patch.object(blocking, "protected_addresses", return_value={}):

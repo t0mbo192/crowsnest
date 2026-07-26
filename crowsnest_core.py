@@ -214,7 +214,7 @@ def is_routable_peer(ip: str) -> bool:
         a = ipaddress.ip_address(ip)
         ok = not (a.is_multicast or a.is_unspecified or ip == "255.255.255.255")
         if ok and a.version == 4 and a.is_private and ip.endswith(".255"):
-            ok = False              # subnet broadcast, e.g. 192.168.0.255
+            ok = False              # subnet broadcast, e.g. 192.168.1.255
     except ValueError:
         ok = False
     _routable_memo[ip] = ok

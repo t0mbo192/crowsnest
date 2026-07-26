@@ -6,7 +6,7 @@ A terminal tool that reduces network traffic to the one question you usually
 actually have: *what is my machine talking to, and what is talking to it?*
 
 ```
-crowsnest live  ·  eth0  ·  this machine 192.168.0.120
+crowsnest live  ·  eth0  ·  this machine 192.168.1.120
   each host is reported once, when first seen. Ctrl-C for a summary.
 
   08:22:13  ↑  github.com                     GitHub - code hosting
