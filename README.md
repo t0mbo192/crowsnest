@@ -5,6 +5,11 @@
 A terminal tool that reduces network traffic to the one question you usually
 actually have: *what is my machine talking to, and what is talking to it?*
 
+![the crowsnest dashboard](docs/dashboard.png)
+
+By default it does not draw a dashboard at all. It reports each host **once**,
+when it first appears, and then says nothing:
+
 ```
 crowsnest live  ·  eth0  ·  this machine 192.168.1.120
   each host is reported once, when first seen. Ctrl-C for a summary.
@@ -16,6 +21,9 @@ crowsnest live  ·  eth0  ·  this machine 192.168.1.120
   08:22:19  ↓  laptop.lan                     Local network device
   08:22:24  ↓  203.0.113.5                    DigitalOcean, LLC
 ```
+
+`--dashboard` gives you the framed view above, with transfer rates, a search
+box, and panels you can open and close.
 
 Four things it does that a packet list does not:
 
@@ -98,7 +106,10 @@ crowsnest asn 8.8.8.8                     # who owns an address?
 crowsnest update                          # is there a newer crowsnest?
 ```
 
-`live` takes `--dashboard` for a continuously redrawn table with transfer rates,
+In the dashboard: `/` search, `o` and `i` open or close a panel, `c` reset,
+`q` quit. Ten hosts a panel until you open one.
+
+`live` takes `--dashboard` for the framed view with transfer rates,
 `--filter 'not port 22'` for a capture filter, `--duration N` to stop
 automatically, `--top N` for the summary length, and `--me IP` if it picks the
 wrong local address. Ctrl-C prints a full inbound/outbound summary.

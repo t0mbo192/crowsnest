@@ -418,18 +418,25 @@ def render_dashboard(rows: list[dict], meta: dict, glyphs: Glyphs, style: Style,
     # spare, and the total is clipped to the height either way, so the frame
     # always fits on one screen instead of scrolling the last one out of view.
     spare = max(4, height - len(header) - 10)
-    if view.expanded:
-        opened = [k for k in ("out", "in") if k in view.expanded]
-        share = max(2, spare // len(opened))
-        out_cap = share if "out" in view.expanded else min(DEFAULT_ROWS, spare)
-        in_cap = share if "in" in view.expanded else min(DEFAULT_ROWS, spare)
-    else:
-        out_cap = in_cap = min(DEFAULT_ROWS, spare)
-    # Capped by how many rows each panel actually has, so an open panel with
-    # little in it hands the leftover height to the other one instead of
-    # reserving space it will not use.
-    out_limit = max(2, min(out_cap, max(len(outbound), 2), spare - 2))
-    in_limit = max(2, min(in_cap, spare - out_limit))
+
+    # What each panel would like: ten by default, everything once opened, and
+    # never more rows than it actually has.
+    def wanted(rows_here: list[dict], which: str) -> int:
+        if which in view.expanded:
+            return max(1, len(rows_here))
+        return max(1, min(DEFAULT_ROWS, len(rows_here)))
+
+    want_out, want_in = wanted(outbound, "out"), wanted(inbound, "in")
+
+    # If they do not both fit, trim whichever is asking for more. Taking from
+    # the greedier one keeps a four-host panel from being cut to two lines
+    # because the other one had plenty.
+    while want_out + want_in > spare and max(want_out, want_in) > 1:
+        if want_out >= want_in:
+            want_out -= 1
+        else:
+            want_in -= 1
+    out_limit, in_limit = want_out, want_in
 
     def hosts(n: int, total: int) -> str:
         shown = f"{n} host" if n == 1 else f"{n} hosts"
