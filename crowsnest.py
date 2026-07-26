@@ -160,6 +160,160 @@ def banner_lines(style: Style) -> list[str]:
             for line in mark.BANNER.split("\n")]
 
 
+# How many hosts each panel shows before you ask for more.
+DEFAULT_ROWS = 10
+
+
+# -------------------------------------------------------------------- screen
+class Screen:
+    """Owns the terminal while the dashboard runs.
+
+    Draws into the alternate screen buffer, so frames replace each other instead
+    of scrolling into the scrollback, and the shell comes back exactly as it was
+    on exit.
+
+    Screen control is deliberately separate from colour. They were the same flag
+    before, so --no-color also stopped the clear, and every interval printed a
+    fresh banner down the window instead of redrawing one.
+    """
+
+    def __init__(self, enabled: bool):
+        self.on = enabled
+        self._entered = False
+        self._held: list[str] | None = None
+
+    def __enter__(self):
+        if self.on:
+            # alternate buffer, then hide the cursor
+            sys.stdout.write(f"{ESC}?1049h{ESC}?25l")
+            sys.stdout.flush()
+            self._entered = True
+        return self
+
+    def __exit__(self, *_):
+        if self._entered:
+            sys.stdout.write(f"{ESC}?25h{ESC}?1049l")
+            sys.stdout.flush()
+            self._entered = False
+        elif self._held is not None:
+            # Nothing was drawn as we went, so show where things ended up.
+            sys.stdout.write("\n".join(self._held) + "\n")
+            sys.stdout.flush()
+            self._held = None
+        return False
+
+    def draw(self, lines: list[str]) -> None:
+        """Replace what is on screen, clipped so it can never scroll."""
+        if not self.on:
+            # Without screen control there is no way to replace a frame, and
+            # writing each one produced a column of stacked banners marching
+            # down the window. Hold the latest instead and print it on the way
+            # out, so a redirected run still ends with something useful.
+            self._held = lines
+            return
+        rows = max(4, term_height() - 1)
+        body = lines[:rows]
+        # Home, draw, then clear from the cursor down, so a shorter frame does
+        # not leave the tail of a longer one behind it.
+        sys.stdout.write(f"{ESC}H" + "\n".join(body) + f"{ESC}0J")
+        sys.stdout.flush()
+
+
+class Keys:
+    """Single keypresses, without blocking and without a dependency.
+
+    curses would do this, but it is absent on Windows, and the whole point of
+    this project is that it installs with no wheels to build.
+    """
+
+    def __init__(self, enabled: bool):
+        self.on = enabled and sys.stdin.isatty()
+        self._fd = None
+        self._saved = None
+
+    def __enter__(self):
+        if self.on and os.name != "nt":
+            try:
+                import termios
+                import tty
+                self._fd = sys.stdin.fileno()
+                self._saved = termios.tcgetattr(self._fd)
+                tty.setcbreak(self._fd)
+            except Exception:
+                self.on = False
+        return self
+
+    def __exit__(self, *_):
+        if self._saved is not None:
+            try:
+                import termios
+                termios.tcsetattr(self._fd, termios.TCSADRAIN, self._saved)
+            except Exception:
+                pass
+        return False
+
+    def get(self) -> str | None:
+        """The next key waiting, or None. Never blocks."""
+        if not self.on:
+            return None
+        try:
+            if os.name == "nt":
+                import msvcrt
+                if not msvcrt.kbhit():
+                    return None
+                return msvcrt.getwch()
+            import select
+            if not select.select([sys.stdin], [], [], 0)[0]:
+                return None
+            return sys.stdin.read(1)
+        except Exception:
+            return None
+
+
+class View:
+    """What the viewer has asked to see: a filter, and which panels are open."""
+
+    def __init__(self):
+        self.search = ""
+        self.editing = False
+        self.expanded: set[str] = set()
+
+    def matches(self, row: dict) -> bool:
+        if not self.search:
+            return True
+        needle = self.search.lower()
+        return needle in f"{row['site']} {row['description']} {row['ip']}".lower()
+
+    def limit(self, which: str, available: int) -> int:
+        """Rows to show for a panel: ten, or as many as will fit when opened."""
+        return available if which in self.expanded else min(DEFAULT_ROWS, available)
+
+    def handle(self, key: str) -> bool:
+        """Apply a keypress. False means quit."""
+        if self.editing:
+            if key in ("\r", "\n"):
+                self.editing = False
+            elif key == "\x1b":                     # Esc abandons the search
+                self.search, self.editing = "", False
+            elif key in ("\x7f", "\b"):
+                self.search = self.search[:-1]
+            elif key.isprintable():
+                self.search += key
+            return True
+        if key in ("q", "Q"):
+            return False
+        if key == "/":
+            self.editing = True
+        elif key in ("o", "O"):
+            self.expanded ^= {"out"}
+        elif key in ("i", "I"):
+            self.expanded ^= {"in"}
+        elif key in ("c", "C", "\x1b"):
+            self.search = ""
+            self.expanded.clear()
+        return True
+
+
 # -------------------------------------------------------------------- panels
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -192,7 +346,7 @@ def box(title: str, body: list[str], width: int, glyphs: Glyphs,
 
 
 def panel_rows(rows: list[dict], width: int, limit: int, style: Style,
-               inbound: bool) -> list[str]:
+               inbound: bool, filtered: bool = False) -> list[str]:
     """The body of a direction panel: host, what it is, volume, rate."""
     inner = max(30, width - 4)
     rate_w, data_w = 10, 9
@@ -210,7 +364,8 @@ def panel_rows(rows: list[dict], width: int, limit: int, style: Style,
                 f"{rate_text:>{rate_w}}")
         body.append(style(line, Style.IN) if inbound else line)
     if not rows:
-        body.append(style("  nothing yet", Style.DIM))
+        body.append(style("  nothing matches" if filtered else "  nothing yet",
+                          Style.DIM))
     hidden = len(rows) - min(len(rows), limit)
     if hidden > 0:
         body.append(style(f"  ... {hidden} more", Style.DIM))
@@ -218,7 +373,7 @@ def panel_rows(rows: list[dict], width: int, limit: int, style: Style,
 
 
 def render_dashboard(rows: list[dict], meta: dict, glyphs: Glyphs, style: Style,
-                     interface: str, elapsed: float) -> list[str]:
+                     interface: str, elapsed: float, view: View) -> list[str]:
     """The full-screen view: a header with the logo, then one panel each way."""
     width = min(term_width(), 120)
     height = term_height()
@@ -254,30 +409,64 @@ def render_dashboard(rows: list[dict], meta: dict, glyphs: Glyphs, style: Style,
         right = captions[i] if i < len(captions) else ""
         header.append(f" {line}{' ' * (pad - visible_len(line))}  {right}".rstrip())
 
-    outbound = [r for r in rows if r["direction"].startswith("out")]
-    inbound = [r for r in rows if not r["direction"].startswith("out")]
+    all_out = [r for r in rows if r["direction"].startswith("out")]
+    all_in = [r for r in rows if not r["direction"].startswith("out")]
+    outbound = [r for r in all_out if view.matches(r)]
+    inbound = [r for r in all_in if view.matches(r)]
 
-    # Share the rows left over after the frames between the two panels.
+    # Ten rows a panel by default. Opening one gives it whatever the window can
+    # spare, and the total is clipped to the height either way, so the frame
+    # always fits on one screen instead of scrolling the last one out of view.
     spare = max(4, height - len(header) - 10)
-    out_limit = max(2, min(len(outbound), spare - min(len(inbound), 4)))
-    in_limit = max(2, spare - out_limit)
+    if view.expanded:
+        opened = [k for k in ("out", "in") if k in view.expanded]
+        share = max(2, spare // len(opened))
+        out_cap = share if "out" in view.expanded else min(DEFAULT_ROWS, spare)
+        in_cap = share if "in" in view.expanded else min(DEFAULT_ROWS, spare)
+    else:
+        out_cap = in_cap = min(DEFAULT_ROWS, spare)
+    # Capped by how many rows each panel actually has, so an open panel with
+    # little in it hands the leftover height to the other one instead of
+    # reserving space it will not use.
+    out_limit = max(2, min(out_cap, max(len(outbound), 2), spare - 2))
+    in_limit = max(2, min(in_cap, spare - out_limit))
 
-    def hosts(n: int) -> str:
-        return f"{n} host" if n == 1 else f"{n} hosts"
+    def hosts(n: int, total: int) -> str:
+        shown = f"{n} host" if n == 1 else f"{n} hosts"
+        return shown if n == total else f"{shown} of {total}"
+
+    def title(label: str, which: str, shown: int, total: int) -> str:
+        state = "open" if which in view.expanded else ""
+        return f"{label}   {hosts(shown, total)}" + (f"   [{state}]" if state else "")
 
     frame = header + [""]
-    frame += box(f"OUTBOUND   {hosts(len(outbound))}",
-                 panel_rows(outbound, width, out_limit, style, inbound=False),
+    frame += box(title("OUTBOUND", "out", len(outbound), len(all_out)),
+                 panel_rows(outbound, width, out_limit, style, inbound=False,
+                            filtered=bool(view.search)),
                  width, glyphs, style)
-    frame += box(f"INBOUND   {hosts(len(inbound))}",
-                 panel_rows(inbound, width, in_limit, style, inbound=True),
+    frame += box(title("INBOUND", "in", len(inbound), len(all_in)),
+                 panel_rows(inbound, width, in_limit, style, inbound=True,
+                            filtered=bool(view.search)),
                  width, glyphs, style)
-    n_out, n_in = len(outbound), len(inbound)
-    frame.append(style(f"  {n_out + n_in} connections "
-                       f"({n_out} out, {n_in} in){glyphs.sep}"
-                       f"{core.human_bytes(meta.get('bytes', 0))} total"
-                       f"{glyphs.sep}Ctrl-C to stop", Style.DIM))
+    frame += footer(outbound, inbound, meta, glyphs, style, view)
     return frame
+
+
+def footer(outbound: list[dict], inbound: list[dict], meta: dict,
+           glyphs: Glyphs, style: Style, view: View) -> list[str]:
+    """Totals, plus what the keys do -- the only place they are advertised."""
+    if view.editing:
+        return [style("  search: ", Style.BOLD) + view.search +
+                style("_", Style.BOLD) +
+                style("      Enter to keep it, Esc to clear", Style.DIM)]
+    left = (f"  {len(outbound) + len(inbound)} shown{glyphs.sep}"
+            f"{core.human_bytes(meta.get('bytes', 0))} total")
+    if view.search:
+        left += f"{glyphs.sep}filter {view.search!r}"
+    if view.expanded:
+        left += f"{glyphs.sep}{'/'.join(sorted(view.expanded))} open"
+    keys = "  /  search    o  outbound    i  inbound    c  reset    q  quit"
+    return [style(left, Style.DIM), style(keys, Style.DIM)]
 
 
 # -------------------------------------------------------------------- table
@@ -320,8 +509,14 @@ def summary_line(rows, meta, glyphs: Glyphs, hidden: int) -> str:
 # --------------------------------------------------------------------- live
 def cmd_live(args) -> int:
     tshark = core.find_tshark()
-    style = Style(enable_ansi() and not args.no_color)
+    # Two separate capabilities: whether escapes work at all, and whether the
+    # viewer wants colour. Tying them together meant --no-color also disabled
+    # the redraw, so frames stacked instead of replacing each other.
+    ansi = enable_ansi()
+    style = Style(ansi and not args.no_color)
     glyphs = Glyphs(unicode_ok() if args.unicode is None else args.unicode)
+    screen = Screen(ansi and args.dashboard)
+    view = View()
 
     my_ips = set(args.me) or core.own_addresses()
     tracker = core.LiveTracker(my_ips)
@@ -354,7 +549,27 @@ def cmd_live(args) -> int:
         print(style("  each host is reported once, when first seen. "
                     "Ctrl-C for a summary.\n", Style.DIM), flush=True)
 
-    while not stop.is_set():
+    if args.dashboard and not ansi:
+        for line in (
+            "note: this terminal cannot take the escape sequences the dashboard",
+            "      needs, so one frame is printed at the end instead of updating",
+            "      in place. Drop --dashboard for the live per-host log.",
+        ):
+            print(line, file=sys.stderr)
+
+    keys_reader = Keys(args.dashboard and ansi)
+    with screen, keys_reader:
+      while not stop.is_set():
+        # Keys are only read in dashboard mode; the quiet log has nothing to
+        # search or open, and stealing stdin from it would be rude.
+        if args.dashboard:
+            pressed = keys_reader.get()
+            while pressed is not None:
+                if not view.handle(pressed):
+                    stop.set()
+                    break
+                last_draw = 0.0        # respond to the key immediately
+                pressed = keys_reader.get()
         try:
             kind, payload = events.get(timeout=0.2)
             if kind == "line":
@@ -402,11 +617,8 @@ def cmd_live(args) -> int:
                 print(style(line, Style.IN) if not outbound else line, flush=True)
             continue
 
-        frame = render_dashboard(rows, meta, glyphs, style, args.interface,
-                                 now - started)
-        sys.stdout.write((f"{ESC}H{ESC}2J" if style.on else "\n\n") +
-                         "\n".join(frame) + "\n")
-        sys.stdout.flush()
+        screen.draw(render_dashboard(rows, meta, glyphs, style, args.interface,
+                                    now - started, view))
 
     stop.set()
     if fatal:
