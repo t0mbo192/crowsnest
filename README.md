@@ -29,8 +29,7 @@ Four things it does that a packet list does not:
 
 - **Reports each host once.** One line when a host first appears, then silence.
   Nothing redraws, nothing scrolls past, nothing repeats — the opposite of a
-  monitor you have to keep staring at. `--dashboard` gives you a live table with
-  transfer rates instead, if that is what you want.
+  monitor you have to keep staring at.
 - **Splits by direction.** Outbound means this machine started the connection;
   inbound means something else did. Taken from the TCP handshake — whoever sends
   the opening SYN is the initiator.
@@ -164,11 +163,13 @@ Live capture needs privileges — run under `sudo`, or
 |---|---|
 | [crowsnest.py](crowsnest.py) | The command line: every subcommand and all terminal output. |
 | [crowsnest_core.py](crowsnest_core.py) | Analysis — direction, host names, descriptions, live tracking. No terminal or display assumptions. |
+| [crowsnest_banner.py](crowsnest_banner.py) | The mark at the top of the dashboard. |
 | [asn_lookup.py](asn_lookup.py) | Names the organisation behind an address, offline. |
 | [blocking.py](blocking.py) | Writes and removes nftables rules, with guardrails. |
 | [updater.py](updater.py) | Checks for a newer version. |
 | [install.sh](install.sh) / [install.ps1](install.ps1) | Installers for Linux/macOS and Windows. |
 | [pyproject.toml](pyproject.toml) | Package metadata, for the `pip`/`pipx` route. |
+| [test_core.py](test_core.py) / [test_blocking.py](test_blocking.py) | 48 tests, no network or capture needed. |
 
 Standard library only, apart from the optional `maxminddb`. No display, no web
 server, no daemon.
