@@ -111,7 +111,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The wheel is built above; attach it too, so Linux and macOS have
+          # something to install from the release rather than only Windows.
+          wheel=$(ls dist/*.whl | head -1)
           gh release create "$GITHUB_REF_NAME" \
             --title "crowsnest ${{ steps.version.outputs.file }}" \
             --generate-notes \
-            "dist/crowsnest.exe#crowsnest.exe (Windows, standalone)"
+            "dist/crowsnest.exe#crowsnest.exe (Windows, standalone)" \
+            "$wheel#$(basename "$wheel") (pip install, any platform)"
