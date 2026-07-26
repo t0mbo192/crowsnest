@@ -37,8 +37,12 @@ Issues = "https://github.com/t0mbo192/crowsnest/issues"
 crowsnest = "crowsnest:main"
 
 [tool.setuptools]
-# Flat modules rather than a package directory -- there are only five.
-py-modules = ["crowsnest", "crowsnest_core", "asn_lookup", "updater", "crowsnest_version"]
+# Flat modules rather than a package directory -- there are only seven. Every
+# module crowsnest imports has to be listed, including the ones imported lazily
+# inside a function: blocking was missing, so a pip-installed copy raised
+# ModuleNotFoundError the first time anyone ran `crowsnest block`.
+py-modules = ["crowsnest", "crowsnest_core", "crowsnest_banner", "blocking",
+              "asn_lookup", "updater", "crowsnest_version"]
 
 [tool.setuptools.dynamic]
 version = { attr = "crowsnest_version.__version__" }
