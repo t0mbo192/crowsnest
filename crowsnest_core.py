@@ -23,6 +23,7 @@ import subprocess
 import threading
 import time
 from collections import defaultdict
+from functools import lru_cache
 
 import asn_lookup
 
@@ -30,6 +31,11 @@ import asn_lookup
 _NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 socket.setdefaulttimeout(2)  # keep reverse-DNS snappy
+
+# A connection nothing has been seen on for this long is finished, and its entry
+# is dead weight. Checked every so many packets rather than on a timer.
+FLOW_IDLE = 300.0
+FLOW_RETIRE_EVERY = 2000
 
 # Folder scanned for the newest capture when a front end is opened with no file.
 DROP_DIR = os.path.join(os.path.expanduser("~"), "Documents", "Captures")
@@ -200,16 +206,12 @@ def _vals(field: str) -> list[str]:
 
 # ipaddress.ip_address() is expensive -- parsing one costs several hundred
 # nanoseconds and a capture asks the same questions about the same few hundred
-# addresses tens of thousands of times. Memoising turns that into a dict hit.
-_routable_memo: dict[str, bool] = {}
-_private_memo: dict[str, bool] = {}
-
-
+# addresses tens of thousands of times, so the answers are cached. lru_cache
+# rather than a plain dict because a long run on a busy link meets far more
+# distinct addresses than a short one, and an unbounded cache is a slow leak.
+@lru_cache(maxsize=16384)
 def is_routable_peer(ip: str) -> bool:
     """A real other end: not multicast, broadcast or unspecified."""
-    known = _routable_memo.get(ip)
-    if known is not None:
-        return known
     try:
         a = ipaddress.ip_address(ip)
         ok = not (a.is_multicast or a.is_unspecified or ip == "255.255.255.255")
@@ -217,20 +219,15 @@ def is_routable_peer(ip: str) -> bool:
             ok = False              # subnet broadcast, e.g. 192.168.1.255
     except ValueError:
         ok = False
-    _routable_memo[ip] = ok
     return ok
 
 
+@lru_cache(maxsize=16384)
 def is_private(ip: str) -> bool:
-    known = _private_memo.get(ip)
-    if known is not None:
-        return known
     try:
-        result = ipaddress.ip_address(ip).is_private
+        return ipaddress.ip_address(ip).is_private
     except ValueError:
-        result = False
-    _private_memo[ip] = result
-    return result
+        return False
 
 
 _rdns_cache: dict[str, str] = {}
@@ -569,17 +566,38 @@ class LiveTracker:
     """
 
     __slots__ = ("my_ips", "conns", "flows", "ip_names", "packets", "bytes",
-                 "_unknown", "_lock")
+                 "dropped_flows", "_unknown", "_clock", "_lock")
 
     def __init__(self, my_ips):
         self.my_ips = set(my_ips)
         self.conns: dict[tuple[str, str], dict] = {}
-        self.flows: dict[tuple, list] = {}          # key -> [initiator, locked]
+        # key -> [initiator, locked, last seen]. One entry per connection, and a
+        # busy resolver opens a fresh source port per query, so this is the one
+        # structure that would grow without limit if nothing retired it.
+        self.flows: dict[tuple, list] = {}
         self.ip_names: dict[str, str] = {}
         self.packets = 0
         self.bytes = 0
+        self.dropped_flows = 0
         self._unknown: dict[str, int] = defaultdict(int)
+        self._clock = time.monotonic()
         self._lock = threading.Lock()
+
+    def _retire_flows(self) -> None:
+        """Forget connections nothing has been seen on for a while.
+
+        Called on a packet count rather than a timer, so it costs nothing on an
+        idle link -- where nothing is accumulating anyway. The clock is read
+        here rather than per packet: at tens of thousands of packets a second
+        that would be a syscall per packet, and a five minute threshold does not
+        need better than this resolution.
+        """
+        self._clock = now = time.monotonic()
+        cutoff = now - FLOW_IDLE
+        stale = [key for key, flow in self.flows.items() if flow[2] < cutoff]
+        for key in stale:
+            del self.flows[key]
+        self.dropped_flows += len(stale)
 
     def feed(self, line: str) -> None:
         # Parsing happens outside the lock and only state changes are
@@ -620,9 +638,13 @@ class LiveTracker:
 
             flow = self.flows.get(key)
             if flow is None:
-                flow = self.flows[key] = [(src, dst), False]
+                flow = self.flows[key] = [(src, dst), False, self._clock]
+            else:
+                flow[2] = self._clock
             if opening:
                 flow[0], flow[1] = (src, dst), True
+            if self.packets % FLOW_RETIRE_EVERY == 0:
+                self._retire_flows()
 
             isrc, idst = flow[0]
             if isrc in self.my_ips and is_routable_peer(idst):
@@ -632,12 +654,16 @@ class LiveTracker:
             else:
                 # Nothing matched a local address, so the guess may be wrong
                 # (VPN, bridge, wrong interface). Adopt the busiest endpoint.
-                self._unknown[src] += 1
-                self._unknown[dst] += 1
-                if not self.my_ips and self.packets % 200 == 0:
-                    best = max(self._unknown, key=self._unknown.get, default="")
-                    if best:
-                        self.my_ips.add(best)
+                if not self.my_ips:
+                    self._unknown[src] += 1
+                    self._unknown[dst] += 1
+                    if self.packets % 200 == 0:
+                        best = max(self._unknown, key=self._unknown.get,
+                                   default="")
+                        if best:
+                            self.my_ips.add(best)
+                            # Its only purpose was that guess; it can go now.
+                            self._unknown.clear()
                 return
 
             conn = self.conns.get((direction, remote))
