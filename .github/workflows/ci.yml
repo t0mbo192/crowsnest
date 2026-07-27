@@ -1,16 +1,16 @@
-name: Release
+name: CI
 
-# Pushing a version tag is the whole release process: this builds a standalone
-# crowsnest.exe and attaches it to a GitHub Release.
+# Tests run on every pull request and every push to main, on all three
+# platforms crowsnest targets. Pushing a version tag additionally builds and
+# publishes a release, but only once the tests have passed.
 #
 #   1. bump __version__ in crowsnest_version.py
 #   2. commit, then:  git tag v1.1.0 && git push origin main --tags
-#
-# Linux and the Raspberry Pi do not use this artifact -- crowsnest is pure Python
-# there, so a git clone plus `git pull` is the whole install and update story.
 
 on:
+  pull_request:
   push:
+    branches: ["main"]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
@@ -23,7 +23,60 @@ permissions:
   contents: write
 
 jobs:
-  windows:
+  test:
+    # Linux is where crowsnest actually gets deployed and where the blocking
+    # code runs, so it needs testing there and not only on the machine it
+    # happens to be written on.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the optional dependency
+        run: pip install --upgrade maxminddb
+
+      # No tshark on the runners and no capture in the repo -- captures are
+      # git-ignored -- so this proves the logic, the wiring and the imports,
+      # not packet analysis.
+      - name: Tests
+        run: python -m unittest discover -p "test_*.py" -v
+
+      - name: Every subcommand is wired up
+        shell: bash
+        run: |
+          python crowsnest.py --version
+          python crowsnest.py --help > /dev/null
+          for sub in $(python crowsnest.py --help |
+                       sed -n 's/^ *{\(.*\)}$/\1/p' | tr ',' ' '); do
+            echo "checking: crowsnest $sub --help"
+            python crowsnest.py "$sub" --help > /dev/null
+          done
+
+      - name: Modules import cleanly
+        shell: bash
+        run: |
+          # Every module, including the ones imported lazily inside a command,
+          # since those are the ones a packaging mistake silently drops.
+          python - <<'PY'
+          import importlib, pathlib
+          for path in sorted(pathlib.Path(".").glob("*.py")):
+              if path.name.startswith("test_"):
+                  continue
+              importlib.import_module(path.stem)
+              print("  ok", path.name)
+          PY
+
+  release:
+    # Only for a tag, and only once every platform above is green.
+    needs: test
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,29 +105,14 @@ jobs:
       - name: Install build tools
         run: pip install --upgrade pyinstaller maxminddb build
 
-      # Also ship a wheel, so `pip install` works on Linux and macOS from the
-      # same release rather than only from a clone.
+      # Ship a wheel too, so Linux and macOS have something to install from the
+      # release rather than only Windows.
       - name: Build wheel
         run: python -m build --wheel --outdir dist
 
-      # The runner has no tshark, and captures are git-ignored for privacy, so
-      # there is nothing here to analyse. What this can prove is that the CLI
-      # imports cleanly and every subcommand is wired up.
-      - name: Smoke-test before packaging
-        shell: bash
-        run: |
-          python crowsnest.py --version
-          python crowsnest.py --help > /dev/null
-          for sub in live read interfaces asn update; do
-            echo "checking: crowsnest $sub --help"
-            python crowsnest.py "$sub" --help > /dev/null
-          done
-          python -c "import crowsnest, crowsnest_core, crowsnest_banner, blocking, asn_lookup, updater, crowsnest_version"
-          python -m unittest discover -p "test_*.py" -v
-
-      # A console app, not windowed: crowsnest is a terminal tool now.
-      # maxminddb is imported lazily inside a function, so name it explicitly
-      # rather than relying on static analysis to spot it.
+      # A console app, not windowed: crowsnest is a terminal tool. maxminddb is
+      # imported lazily inside a function, so name it explicitly rather than
+      # relying on static analysis to spot it.
       - name: Build crowsnest.exe
         run: >
           python -m PyInstaller --onefile --console --name crowsnest
@@ -87,9 +125,8 @@ jobs:
         run: |
           ./dist/crowsnest.exe --version
           ./dist/crowsnest.exe --help > /dev/null
-          # maxminddb is imported lazily inside a function, so static analysis
-          # can miss it. If it did not get bundled, ASN names silently stop
-          # working in the released binary -- assert it is really in there.
+          # If maxminddb did not get bundled, ASN names silently stop working in
+          # the released binary -- assert it is really in there.
           status="$(./dist/crowsnest.exe asn 2>&1 || true)"
           echo "$status"
           if echo "$status" | grep -qi "maxminddb is not installed"; then
@@ -112,8 +149,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # The wheel is built above; attach it too, so Linux and macOS have
-          # something to install from the release rather than only Windows.
           wheel=$(ls dist/*.whl | head -1)
           gh release create "$GITHUB_REF_NAME" \
             --title "crowsnest ${{ steps.version.outputs.file }}" \

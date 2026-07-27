@@ -211,7 +211,8 @@ does the rest:
 git tag v1.0.1 && git push origin main --tags
 ```
 
-[The workflow](.github/workflows/release.yml) builds `crowsnest.exe`, smoke-tests
+[The workflow](.github/workflows/ci.yml) tests every pull request on Linux,
+Windows and macOS. On a version tag it also builds `crowsnest.exe`, smoke-tests
 it, and publishes a Release. It fails if the tag disagrees with the version in
 source, so a mislabelled build cannot ship. Rehearse from the Actions tab with
 `dry_run` left on.
