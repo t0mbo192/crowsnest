@@ -42,7 +42,7 @@ crowsnest = "crowsnest:main"
 # inside a function: blocking was missing, so a pip-installed copy raised
 # ModuleNotFoundError the first time anyone ran `crowsnest block`.
 py-modules = ["crowsnest", "crowsnest_core", "crowsnest_banner", "blocking",
-              "asn_lookup", "updater", "crowsnest_version"]
+              "gateway", "asn_lookup", "updater", "crowsnest_version"]
 
 [tool.setuptools.dynamic]
 version = { attr = "crowsnest_version.__version__" }
