@@ -53,6 +53,59 @@ FIELDS = [
 # "What is this host?"  First substring match wins, so order specific -> general.
 # ----------------------------------------------------------------------------
 DESCRIPTIONS = [
+    # --- mobile ------------------------------------------------------------
+    # First, because several would otherwise be swallowed by a general entry
+    # further down: "push.apple.com" contains "apple.com" and would read as
+    # "Apple services", which is the wrong thing to be told about the one host
+    # on a phone that must never be blocked.
+    #
+    # A phone sitting in a pocket doing nothing emits a different mix from a
+    # laptop: attribution SDKs, crash reporters and ad networks bundled into
+    # apps rather than chosen by anyone. Those are worth naming because they
+    # are the ones someone would want to stop.
+    ("push.apple.com", "Apple Push Notification service"),
+    ("courier.push.apple.com", "Apple Push Notification service"),
+    ("albert.apple.com", "Apple device activation"),
+    ("gs.apple.com", "Apple device authentication"),
+    ("apple-dns.net", "Apple services (DNS)"),
+    ("gsp-ssl.ls.apple.com", "Apple location services"),
+    ("gspe", "Apple location services"),
+    ("weather-data.apple.com", "Apple Weather"),
+    ("captive.apple.com", "Apple connectivity check"),
+    ("itunes.apple.com", "App Store / iTunes"),
+    ("appattest", "Apple App Attest (anti-fraud)"),
+    ("mtalk.google.com", "Android push notifications"),
+    ("android.clients.google.com", "Google Play services"),
+    ("app-measurement.com", "Google/Firebase analytics (tracking)"),
+    ("firebaseinstallations", "Firebase (app identity)"),
+    ("firebaseremoteconfig", "Firebase Remote Config"),
+    ("crashlytics", "Firebase Crashlytics - crash reporting"),
+    ("appsflyer", "AppsFlyer - install attribution (tracking)"),
+    ("adjust.com", "Adjust - install attribution (tracking)"),
+    ("branch.io", "Branch - deep links / attribution (tracking)"),
+    ("kochava", "Kochava - install attribution (tracking)"),
+    ("singular.net", "Singular - install attribution (tracking)"),
+    ("onesignal", "OneSignal - push / analytics"),
+    ("bugsnag", "Bugsnag - crash reporting"),
+    ("instabug", "Instabug - in-app feedback / diagnostics"),
+    ("applovin", "AppLovin advertising"),
+    ("unityads", "Unity Ads"),
+    ("unity3d", "Unity Ads"),
+    ("ironsrc", "ironSource advertising"),
+    ("vungle", "Vungle advertising"),
+    ("chartboost", "Chartboost advertising"),
+    ("inmobi", "InMobi advertising"),
+    ("mopub", "MoPub advertising"),
+    ("tiktokv", "TikTok"),
+    ("byteoversea", "TikTok / ByteDance"),
+    ("snapchat", "Snapchat"),
+    ("sc-cdn", "Snapchat (CDN)"),
+    ("threads.net", "Threads / Meta"),
+    ("cdninstagram", "Instagram / Meta (CDN)"),
+    ("whatsapp.net", "WhatsApp / Meta"),
+    ("spotifycdn", "Spotify (CDN)"),
+
+    # --- general -----------------------------------------------------------
     ("1e100.net", "Google infrastructure"),
     ("googlevideo.com", "YouTube video streaming"),
     ("ytimg", "YouTube (images)"),

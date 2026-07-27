@@ -157,6 +157,60 @@ blocking them breaks the machine rather than protecting it:
 Live capture needs privileges — run under `sudo`, or
 `sudo usermod -aG wireshark $USER` and log back in.
 
+### Watching another device
+
+Point crowsnest at a router interface and it reports what everything *behind*
+that interface is talking to — a phone, a TV, a games console, anything that
+cannot run crowsnest itself. On a Raspberry Pi acting as a WireGuard gateway:
+
+```bash
+sudo crowsnest live -i wg0 --me 10.6.0.2
+```
+
+`--me` matters here. crowsnest normally works out which address is the machine
+it is watching by taking the busiest endpoint, and on a gateway that is the
+gateway itself. Naming the device's address makes *outbound* mean "from that
+device", which is what you want to read.
+
+[docs/setup-wireguard.sh](docs/setup-wireguard.sh) sets a Pi up that way —
+prerequisites, keys, forwarding, NAT, and a QR code for the phone. It has
+`--dry-run` and `--uninstall`, and installs nothing on its own.
+
+Blocking needs `--gateway`, because forwarded traffic never reaches the input
+hook the ordinary rules sit on:
+
+```bash
+sudo crowsnest block graph.facebook.com --gateway --client 10.6.0.2 --dry-run
+```
+
+| | chain | matches | protects |
+|---|---|---|---|
+| default | input | `ip saddr` | this machine |
+| `--gateway` | forward | both directions | the routed device |
+
+Addresses go into nftables named sets rather than one rule each, so the ruleset
+stays four rules wide however many hosts accumulate.
+
+Two guardrails are added on top of the usual ones. `--client` names the
+device's own address so it cannot be cut off by accident — an easy mistake,
+since the device is right there in crowsnest's own output. And a handful of
+hostnames are refused because blocking them breaks the device rather than
+protecting it:
+
+| Refused | Why |
+|---|---|
+| `*.push.apple.com`, `mtalk.google.com` | carry every notification on the device; blocking stops all push, and nothing about the symptom points here |
+| `albert.apple.com`, `gs.apple.com` | device activation and authentication |
+| `time.apple.com` | a device with a wrong clock fails TLS almost everywhere |
+| `*.apple-dns.net` | breaks iCloud, the App Store and Find My |
+
+Those are matched on the name as typed, before it is resolved — Apple push runs
+over a range too wide to enumerate and its addresses rotate.
+
+Unlike blocking for this machine, a gateway block is **inline**: the traffic is
+passing through, so a blocked host is never reached at all rather than merely
+being stopped after the first contact.
+
 ## What is here
 
 | File | |
@@ -166,10 +220,12 @@ Live capture needs privileges — run under `sudo`, or
 | [crowsnest_banner.py](crowsnest_banner.py) | The mark at the top of the dashboard. |
 | [asn_lookup.py](asn_lookup.py) | Names the organisation behind an address, offline. |
 | [blocking.py](blocking.py) | Writes and removes nftables rules, with guardrails. |
+| [gateway.py](gateway.py) | The same, on the forward chain, for a device routed through this machine. |
+| [docs/setup-wireguard.sh](docs/setup-wireguard.sh) | Sets a Raspberry Pi up as a WireGuard gateway to watch. |
 | [updater.py](updater.py) | Checks for a newer version. |
 | [install.sh](install.sh) / [install.ps1](install.ps1) | Installers for Linux/macOS and Windows. |
 | [pyproject.toml](pyproject.toml) | Package metadata, for the `pip`/`pipx` route. |
-| [test_core.py](test_core.py) / [test_blocking.py](test_blocking.py) | 48 tests, no network or capture needed. |
+| [test_core.py](test_core.py) / [test_blocking.py](test_blocking.py) / [test_gateway.py](test_gateway.py) | 81 tests, no network or capture needed. |
 
 Standard library only, apart from the optional `maxminddb`. No display, no web
 server, no daemon.

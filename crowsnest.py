@@ -841,10 +841,43 @@ def _confirm(prompt: str, assume_yes: bool) -> bool:
         return False
 
 
+def _rules_module(args):
+    """Which blocking module this command should use.
+
+    The two expose the same names on purpose, so everything downstream can call
+    the module without caring which it got. What differs is where the rules land:
+    blocking guards this machine on the input hook, gateway guards a routed
+    device on the forward hook.
+    """
+    import blocking
+    if getattr(args, "gateway", False):
+        import gateway
+        return gateway
+    return blocking
+
+
 def cmd_block(args) -> int:
     import blocking
+    rules = _rules_module(args)
     _blocking_or_exit()
     style = Style(enable_ansi() and not args.no_color)
+
+    # Some hosts break the routed device rather than protect it, and are only
+    # identifiable by name -- Apple push runs over a range too wide to
+    # enumerate and its addresses rotate. So this is checked on the target as
+    # typed, before anything is resolved.
+    if getattr(args, "gateway", False) and not args.force:
+        refused = [(t, rules.risky_hostname(t)) for t in args.targets]
+        refused = [(t, why) for t, why in refused if why]
+        if refused:
+            print(style("\nRefusing to block:", Style.BOLD), file=sys.stderr)
+            for target, why in refused:
+                print(f"  {target}  -- {why}", file=sys.stderr)
+            print("\nPass --force if you are certain.", file=sys.stderr)
+            names = {t for t, _ in refused}
+            args.targets = [t for t in args.targets if t not in names]
+            if not args.targets:
+                return 1
 
     addresses: list[str] = []
     for target in args.targets:
@@ -853,8 +886,11 @@ def cmd_block(args) -> int:
             print(f"  {target} -> {', '.join(found)}")
         addresses += [a for a in found if a not in addresses]
 
-    # Refuse the addresses whose blocking tends to break the machine.
-    problems = blocking.check_targets(addresses)
+    # Refuse the addresses whose blocking tends to break things.
+    if getattr(args, "gateway", False):
+        problems = rules.check_targets(addresses, client_ips=args.client)
+    else:
+        problems = rules.check_targets(addresses)
     if problems and not args.force:
         print(style("\nRefusing to block:", Style.BOLD), file=sys.stderr)
         for address, why in problems.items():
@@ -864,7 +900,7 @@ def cmd_block(args) -> int:
         if not addresses:
             return 1
 
-    already = {e["address"] for e in blocking.list_blocks()}
+    already = {e["address"] for e in rules.list_blocks()}
     fresh = [a for a in addresses if a not in already]
     for address in addresses:
         if address in already:
@@ -873,14 +909,22 @@ def cmd_block(args) -> int:
         return 0
 
     print(style("\nThis will run:", Style.BOLD))
-    for line in blocking.describe_commands(fresh):
+    for line in rules.describe_commands(fresh):
         print(f"  {line}")
-    print(style("\nInbound traffic from these hosts will be dropped. Existing "
-                "firewall rules are untouched;\ncrowsnest only writes to its own "
-                f"'{blocking.TABLE}' table.", Style.DIM))
+    if getattr(args, "gateway", False):
+        print(style("\nThe monitored device will no longer reach these hosts, in "
+                    "either direction.\nExisting firewall rules are untouched; "
+                    f"crowsnest only writes to its own\n'{rules.TABLE}' table.",
+                    Style.DIM))
+    else:
+        print(style("\nInbound traffic from these hosts will be dropped. Existing "
+                    "firewall rules are untouched;\ncrowsnest only writes to its own "
+                    f"'{rules.TABLE}' table.", Style.DIM))
     if not args.persist:
+        restore = "`crowsnest blocks --gateway --restore`" \
+            if getattr(args, "gateway", False) else "`crowsnest blocks --restore`"
         print(style("This lasts until reboot. Add --persist to record it for "
-                    "`crowsnest blocks --restore`.", Style.DIM))
+                    f"{restore}.", Style.DIM))
 
     if args.dry_run:
         print("\ndry run: nothing was changed.")
@@ -889,32 +933,37 @@ def cmd_block(args) -> int:
         print("nothing was changed.")
         return 1
 
-    added = blocking.block(fresh)
+    added = rules.block(fresh)
     for address in added:
         print(style(f"  blocked {address}", Style.IN))
     if args.persist and added:
-        blocking.save_record(added)
-        print(f"\nrecorded in {blocking.RECORD_PATH}")
-        print(blocking.restore_hint())
+        rules.save_record(added)
+        print(f"\nrecorded in {rules.RECORD_PATH}")
+        print(rules.restore_hint())
     return 0
 
 
 def cmd_unblock(args) -> int:
     import blocking
+    rules = _rules_module(args)
     _blocking_or_exit()
 
     if args.all:
-        entries = blocking.list_blocks()
+        entries = rules.list_blocks()
         if not entries:
             print("nothing is blocked.")
             return 0
-        print(f"This will remove all {len(entries)} block(s) and drop "
-              f"crowsnest's '{blocking.TABLE}' table.")
+        # Gateway mode empties its sets and leaves the chain standing, rather
+        # than dropping the table -- the wording follows what actually happens.
+        what = (f"empty crowsnest's blocked sets"
+                if getattr(args, "gateway", False)
+                else f"drop crowsnest's '{rules.TABLE}' table")
+        print(f"This will remove all {len(entries)} block(s) and {what}.")
         if not _confirm("Remove them all?", args.yes):
             print("nothing was changed.")
             return 1
-        count = blocking.unblock_all()
-        blocking.forget_record(None)
+        count = rules.unblock_all()
+        rules.forget_record(None)
         print(f"removed {count} block(s).")
         return 0
 
@@ -922,42 +971,42 @@ def cmd_unblock(args) -> int:
     for target in args.targets:
         addresses += [a for a in blocking.resolve_target(target)
                       if a not in addresses]
-    removed = blocking.unblock(addresses)
+    removed = rules.unblock(addresses)
     if not removed:
         print("none of those were blocked.")
         return 0
-    blocking.forget_record(removed)
+    rules.forget_record(removed)
     for address in removed:
         print(f"  unblocked {address}")
     return 0
 
 
 def cmd_blocks(args) -> int:
-    import blocking
+    rules = _rules_module(args)
     _blocking_or_exit()
 
     if args.restore:
-        recorded = blocking.load_record()
+        recorded = rules.load_record()
         if not recorded:
-            print(f"nothing recorded in {blocking.RECORD_PATH}")
+            print(f"nothing recorded in {rules.RECORD_PATH}")
             return 0
-        active = {e["address"] for e in blocking.list_blocks()}
+        active = {e["address"] for e in rules.list_blocks()}
         missing = [a for a in recorded if a not in active]
         if not missing:
             print(f"all {len(recorded)} recorded block(s) are already active.")
             return 0
         print("This will reapply:")
-        for line in blocking.describe_commands(missing):
+        for line in rules.describe_commands(missing):
             print(f"  {line}")
         if not _confirm("\nApply?", args.yes):
             print("nothing was changed.")
             return 1
-        for address in blocking.block(missing):
+        for address in rules.block(missing):
             print(f"  blocked {address}")
         return 0
 
-    entries = blocking.list_blocks()
-    recorded = set(blocking.load_record())
+    entries = rules.list_blocks()
+    recorded = set(rules.load_record())
     if not entries:
         print("nothing is blocked.")
         if recorded:
@@ -1037,9 +1086,19 @@ def build_parser() -> argparse.ArgumentParser:
     asn.add_argument("ips", nargs="*", help="addresses to look up")
     asn.set_defaults(func=cmd_asn)
 
+    # --gateway switches which hook the rules land on: without it they protect
+    # this machine, with it they protect a device routed through it. Every
+    # blocking command takes it, since a block made in one mode has to be
+    # listed and removed in the same one.
+    def gateway_flag(parser) -> None:
+        parser.add_argument("--gateway", action="store_true",
+                            help="block for a device routed through this "
+                                 "machine (forward chain) rather than for this "
+                                 "machine itself")
+
     # Blocking writes firewall rules, so every one of these shows the exact
     # command and asks before changing anything.
-    blk = sub.add_parser("block", help="drop inbound traffic from a host (Linux)")
+    blk = sub.add_parser("block", help="drop traffic from a host (Linux)")
     blk.add_argument("targets", nargs="+", metavar="HOST",
                      help="hostname or address to block")
     blk.add_argument("--persist", action="store_true",
@@ -1049,20 +1108,27 @@ def build_parser() -> argparse.ArgumentParser:
                      help="show what would happen and stop")
     blk.add_argument("--yes", action="store_true", help="do not ask first")
     blk.add_argument("--force", action="store_true",
-                     help="allow blocking the gateway, DNS or your SSH peer")
+                     help="allow blocking the gateway, DNS, your SSH peer, or "
+                          "a host the monitored device depends on")
     blk.add_argument("--no-color", action="store_true", help="disable colour")
+    gateway_flag(blk)
+    blk.add_argument("--client", action="append", default=[], metavar="IP",
+                     help="address of the device being monitored, so it cannot "
+                          "be blocked by accident (repeatable, --gateway only)")
     blk.set_defaults(func=cmd_block)
 
     unb = sub.add_parser("unblock", help="remove a block")
     unb.add_argument("targets", nargs="*", metavar="HOST")
     unb.add_argument("--all", action="store_true", help="remove every block")
     unb.add_argument("--yes", action="store_true", help="do not ask first")
+    gateway_flag(unb)
     unb.set_defaults(func=cmd_unblock)
 
     bls = sub.add_parser("blocks", help="list blocks, or reapply recorded ones")
     bls.add_argument("--restore", action="store_true",
                      help="reapply blocks recorded with --persist")
     bls.add_argument("--yes", action="store_true", help="do not ask first")
+    gateway_flag(bls)
     bls.set_defaults(func=cmd_blocks)
 
     upd = sub.add_parser("update", help="check whether a newer crowsnest exists")
