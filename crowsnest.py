@@ -345,14 +345,35 @@ def box(title: str, body: list[str], width: int, glyphs: Glyphs,
     return out
 
 
-def panel_rows(rows: list[dict], width: int, limit: int, style: Style,
-               inbound: bool, filtered: bool = False) -> list[str]:
-    """The body of a direction panel: host, what it is, volume, rate."""
+def panel_widths(width: int) -> tuple[int, int, int, int]:
+    """Column widths for a panel: host, description, volume, rate.
+
+    Worked out in one place so the labels above the panels cannot drift out of
+    step with the values inside them.
+    """
     inner = max(30, width - 4)
     rate_w, data_w = 10, 9
     flexible = inner - rate_w - data_w - 4
     site_w = max(14, int(flexible * 0.52))
     desc_w = max(10, flexible - site_w)
+    return site_w, desc_w, data_w, rate_w
+
+
+def column_labels(width: int, style: Style) -> str:
+    """Names for the columns, once, above both panels.
+
+    The two leading spaces stand in for the panel's left border and the space
+    after it, so a label sits directly over its column.
+    """
+    site_w, desc_w, data_w, rate_w = panel_widths(width)
+    return style(f"  {'SITE / HOST':<{site_w}} {'WHAT IT IS':<{desc_w}} "
+                 f"{'DATA':>{data_w}} {'RATE':>{rate_w}}", Style.DIM)
+
+
+def panel_rows(rows: list[dict], width: int, limit: int, style: Style,
+               inbound: bool, filtered: bool = False) -> list[str]:
+    """The body of a direction panel: host, what it is, volume, rate."""
+    site_w, desc_w, data_w, rate_w = panel_widths(width)
 
     body = []
     for r in rows[:limit]:
@@ -417,7 +438,7 @@ def render_dashboard(rows: list[dict], meta: dict, glyphs: Glyphs, style: Style,
     # Ten rows a panel by default. Opening one gives it whatever the window can
     # spare, and the total is clipped to the height either way, so the frame
     # always fits on one screen instead of scrolling the last one out of view.
-    spare = max(4, height - len(header) - 10)
+    spare = max(4, height - len(header) - 11)
 
     # What each panel would like: ten by default, everything once opened, and
     # never more rows than it actually has.
@@ -446,7 +467,7 @@ def render_dashboard(rows: list[dict], meta: dict, glyphs: Glyphs, style: Style,
         state = "open" if which in view.expanded else ""
         return f"{label}   {hosts(shown, total)}" + (f"   [{state}]" if state else "")
 
-    frame = header + [""]
+    frame = header + ["", column_labels(width, style)]
     frame += box(title("OUTBOUND", "out", len(outbound), len(all_out)),
                  panel_rows(outbound, width, out_limit, style, inbound=False,
                             filtered=bool(view.search)),
