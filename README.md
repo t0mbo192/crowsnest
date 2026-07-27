@@ -176,6 +176,10 @@ device", which is what you want to read.
 prerequisites, keys, forwarding, NAT, and a QR code for the phone. It has
 `--dry-run` and `--uninstall`, and installs nothing on its own.
 
+That gets you a tunnel that works at home. [docs/cellular.md](docs/cellular.md)
+covers the rest: giving the Pi a name that reaches it from outside, what to do
+when your ISP will not let anything in, and how to tell the difference.
+
 Blocking needs `--gateway`, because forwarded traffic never reaches the input
 hook the ordinary rules sit on:
 

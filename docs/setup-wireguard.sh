@@ -25,6 +25,14 @@ CLIENT_V4="10.6.0.2"
 WG_DIR=/etc/wireguard
 # Override with --dns if you run a resolver on the Pi (dnsmasq, Pi-hole).
 DNS_SERVER="1.1.1.1"
+# Where the phone should look for this Pi. Empty means "use the LAN address",
+# which only works at home; --endpoint takes a public address or DDNS name and
+# is what makes the tunnel connect over cellular. See docs/cellular.md.
+ENDPOINT_HOST=""
+# Cellular links sometimes cannot carry WireGuard's default 1420-byte packets.
+# See the troubleshooting section of docs/cellular.md before setting this.
+MTU=""
+QR_ONLY=0
 # NAT lives in its own table so that dropping crowsnest's table -- which
 # `crowsnest unblock --all` does -- cannot take the Pi's routing with it.
 NAT_TABLE=crowsnest_nat
@@ -36,6 +44,9 @@ while [ $# -gt 0 ]; do
     --port)      PORT="$2"; shift ;;
     --iface)     WAN_IFACE="$2"; shift ;;
     --dns)       DNS_SERVER="$2"; shift ;;
+    --endpoint)  ENDPOINT_HOST="$2"; shift ;;
+    --mtu)       MTU="$2"; shift ;;
+    --qr-only)   QR_ONLY=1 ;;
     -h|--help)   sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
@@ -53,6 +64,75 @@ run() {
   fi
 }
 
+# Writes the phone's config and prints it as a QR code.
+#
+# Split out because the endpoint is the one setting people need to change after
+# the fact: you set this up at home against the Pi's LAN address, then later
+# get a public name and want to re-point it without regenerating keys, which
+# would invalidate the tunnel already on the phone. --qr-only does exactly that.
+emit_phone_config() {
+  local phone_key server_pub phone_psk mtu_line
+
+  # --endpoint wins; otherwise the LAN address, which only works at home.
+  ENDPOINT="${ENDPOINT_HOST:-${SERVER_HOST:-}}"
+  if [ -z "$ENDPOINT" ]; then
+    ENDPOINT="<public address or DDNS name of this Pi>"
+  fi
+
+  mtu_line=""
+  if [ -n "$MTU" ]; then
+    mtu_line="
+MTU = ${MTU}"
+  fi
+
+  if [ "$DRY_RUN" = 1 ]; then
+    phone_key="<phone private key>"
+    server_pub="<server public key>"
+    phone_psk="<pre-shared key>"
+  else
+    phone_key=$(cat "${WG_DIR}/phone.key")
+    server_pub=$(cat "${WG_DIR}/server.pub")
+    phone_psk=$(cat "${WG_DIR}/phone.psk")
+  fi
+
+  # DNS goes to a public resolver rather than to this Pi, because nothing is
+  # listening on ${SERVER_V4}:53 and a phone with no resolver has no internet.
+  # Visibility is unaffected: the queries are plaintext UDP/53 and cross the
+  # tunnel either way, so crowsnest reads them off the wire rather than from a
+  # resolver's log. Running dnsmasq or Pi-hole here and pointing --dns at
+  # ${SERVER_V4} is a worthwhile upgrade -- it adds domain-level blocking --
+  # but nothing here needs it.
+  PHONE_CONF="[Interface]
+PrivateKey = ${phone_key}
+Address = ${CLIENT_V4}/32
+DNS = ${DNS_SERVER}${mtu_line}
+
+[Peer]
+PublicKey = ${server_pub}
+PresharedKey = ${phone_psk}
+Endpoint = ${ENDPOINT}:${PORT}
+# Everything, so cellular traffic is covered too.
+AllowedIPs = 0.0.0.0/0, ::/0
+# Keeps the NAT mapping alive so the Pi can still be reached after a quiet
+# spell -- without it an incoming handshake has nowhere to land.
+PersistentKeepalive = 25
+"
+
+  if [ "$DRY_RUN" = 1 ]; then
+    printf '  [dry run] would write %s/phone.conf and print a QR code\n' "$WG_DIR"
+    printf '  [dry run] endpoint would be %s:%s\n' "$ENDPOINT" "$PORT"
+    return
+  fi
+
+  umask 077
+  printf '%s' "$PHONE_CONF" > "${WG_DIR}/phone.conf"
+  echo
+  printf '%s' "$PHONE_CONF" | qrencode -t ansiutf8
+  echo
+  note "endpoint: ${ENDPOINT}:${PORT}"
+  note "also saved to ${WG_DIR}/phone.conf"
+}
+
 if [ "$(id -u)" != 0 ] && [ "$DRY_RUN" = 0 ]; then
   echo "This needs root: sudo $0 $*" >&2
   exit 1
@@ -68,6 +148,26 @@ if [ "$UNINSTALL" = 1 ]; then
   note "Left in place: ${WG_DIR} (your keys and peer configs)."
   note "Delete it yourself if you want them gone: sudo rm -rf ${WG_DIR}"
   note "crowsnest's own nftables table is untouched; use 'crowsnest unblock --all'."
+  exit 0
+fi
+
+# ---------------------------------------------------------------- QR only
+# Re-issue the phone config against a different endpoint, without touching
+# keys, NAT or the service. This is the normal way to move from "works at
+# home" to "works on cellular".
+if [ "$QR_ONLY" = 1 ]; then
+  if [ "$DRY_RUN" = 0 ] && [ ! -f "${WG_DIR}/phone.key" ]; then
+    echo "No existing setup found in ${WG_DIR}. Run without --qr-only first." >&2
+    exit 1
+  fi
+  SERVER_HOST=$(ip -4 addr show "${WAN_IFACE:-$(ip route show default 2>/dev/null \
+    | awk '/default/ {print $5; exit}')}" 2>/dev/null \
+    | awk '/inet /{sub(/\/.*/,"",$2); print $2; exit}' || true)
+  say "Phone configuration"
+  emit_phone_config
+  echo
+  echo "Re-scan this in the WireGuard app, replacing the existing tunnel."
+  echo "The keys are unchanged, so the Pi needs no restart."
   exit 0
 fi
 
@@ -192,43 +292,7 @@ run systemctl enable --now "wg-quick@${WG_IFACE}"
 
 # ------------------------------------------------------------ phone config
 say "Phone configuration"
-
-# Endpoint must be reachable from the phone. On the LAN that is the Pi's own
-# address; from outside it needs a public address or dynamic-DNS name and a
-# forwarded UDP port -- which is what makes this work on cellular.
-ENDPOINT="${SERVER_HOST:-<public address or DDNS name of this Pi>}"
-
-# DNS goes to a public resolver rather than to this Pi, because nothing is
-# listening on ${SERVER_V4}:53 and a phone with no resolver has no internet.
-# Visibility is unaffected: the queries are plaintext UDP/53 and cross wg0
-# either way, so crowsnest reads them off the wire, not from a resolver's log.
-# Running dnsmasq or Pi-hole here and pointing this at ${SERVER_V4} is a
-# worthwhile upgrade -- it adds domain-level blocking -- but it is not needed
-# for any of what follows.
-PHONE_CONF="[Interface]
-PrivateKey = ${PHONE_KEY}
-Address = ${CLIENT_V4}/32
-DNS = ${DNS_SERVER}
-
-[Peer]
-PublicKey = ${SERVER_PUB}
-PresharedKey = ${PHONE_PSK}
-Endpoint = ${ENDPOINT}:${PORT}
-# Everything, so cellular traffic is covered too.
-AllowedIPs = 0.0.0.0/0, ::/0
-PersistentKeepalive = 25
-"
-
-if [ "$DRY_RUN" = 1 ]; then
-  printf '  [dry run] would write %s/phone.conf and print a QR code\n' "$WG_DIR"
-else
-  umask 077
-  printf '%s' "$PHONE_CONF" > "${WG_DIR}/phone.conf"
-  echo
-  printf '%s' "$PHONE_CONF" | qrencode -t ansiutf8
-  echo
-  note "also saved to ${WG_DIR}/phone.conf"
-fi
+emit_phone_config
 
 cat <<EOF
 
@@ -248,13 +312,32 @@ Next
 
   5. Block something:
 
-       sudo crowsnest block <host> --gateway --dry-run
+       sudo crowsnest block <host> --gateway --client ${CLIENT_V4} --dry-run
 
-Note
-  The endpoint above is ${ENDPOINT}. That works on your own network. For this
-  to work on cellular the phone must reach this Pi from outside, which needs a
-  public address or dynamic DNS plus UDP ${PORT} forwarded to it. Until then
-  the tunnel connects only at home.
+EOF
 
-  Undo everything with: sudo $0 --uninstall
+if [ -n "$ENDPOINT_HOST" ]; then
+  cat <<EOF
+Endpoint
+  Set to ${ENDPOINT_HOST}:${PORT}. For this to work away from home that name
+  must resolve to your home connection from the outside, and UDP ${PORT} must
+  be forwarded to this Pi. See docs/cellular.md, which also covers what to do
+  when your ISP does not give you a real public address.
+
+EOF
+else
+  cat <<EOF
+Endpoint
+  Set to ${ENDPOINT}:${PORT}, this Pi's LAN address, so the tunnel connects
+  only at home. To cover cellular, read docs/cellular.md and then re-issue the
+  config without redoing any of the above:
+
+       sudo $0 --qr-only --endpoint <your-name>.duckdns.org
+
+EOF
+fi
+
+cat <<EOF
+Undo
+  sudo $0 --uninstall
 EOF
