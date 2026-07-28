@@ -6,4 +6,4 @@ build scripts and the update checker can read it without pulling in the
 rest of crowsnest.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"

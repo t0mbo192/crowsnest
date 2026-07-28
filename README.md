@@ -50,7 +50,7 @@ Four things it does that a packet list does not:
 [Releases](https://github.com/t0mbo192/crowsnest/releases) and:
 
 ```bash
-sudo apt install ./crowsnest_1.0.0_all.deb
+sudo apt install ./crowsnest_1.1.0_all.deb
 ```
 
 apt pulls in `tshark` itself, so there is no prerequisite to go and install
