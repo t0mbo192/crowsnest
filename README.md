@@ -45,7 +45,21 @@ Four things it does that a packet list does not:
 
 ## Install
 
-One line, on any of the three platforms.
+**Debian, Ubuntu and Raspberry Pi OS** have a package. Download
+`crowsnest_<version>_all.deb` from
+[Releases](https://github.com/t0mbo192/crowsnest/releases) and:
+
+```bash
+sudo apt install ./crowsnest_1.0.0_all.deb
+```
+
+apt pulls in `tshark` itself, so there is no prerequisite to go and install
+first — that one command ends with a working `crowsnest`. It also brings in
+`nftables` and `python3-maxminddb`, so blocking and organisation names work out
+of the box (`--no-install-recommends` if you would rather they did not).
+`sudo apt purge crowsnest` removes it completely.
+
+Everywhere else, one line.
 
 **Linux and macOS**
 
@@ -253,7 +267,8 @@ being stopped after the first contact.
 | [gateway.py](gateway.py) | The same, on the forward chain, for a device routed through this machine. |
 | [docs/setup-wireguard.sh](docs/setup-wireguard.sh) | Sets a Raspberry Pi up as a WireGuard gateway to watch. |
 | [updater.py](updater.py) | Checks for a newer version. |
-| [install.sh](install.sh) / [install.ps1](install.ps1) | Installers for Linux/macOS and Windows. |
+| [install.sh](install.sh) / [install.ps1](install.ps1) | Installers for Linux/macOS and Windows, runnable straight from a URL. |
+| [packaging/build-deb.sh](packaging/build-deb.sh) | Builds the Debian package. Takes its file list from `pyproject.toml` so the two cannot drift. |
 | [pyproject.toml](pyproject.toml) | Package metadata, for the `pip`/`pipx` route. |
 | [test_core.py](test_core.py) / [test_blocking.py](test_blocking.py) / [test_gateway.py](test_gateway.py) / [test_dashboard.py](test_dashboard.py) | 101 tests, no network or capture needed. The dashboard ones replay real frames through a small terminal emulator, since a redraw bug is only visible once the escape sequences have been applied to a screen. |
 
@@ -298,10 +313,13 @@ git tag v1.0.1 && git push origin main --tags
 ```
 
 [The workflow](.github/workflows/ci.yml) tests every pull request on Linux,
-Windows and macOS. On a version tag it also builds `crowsnest.exe`, smoke-tests
-it, and publishes a Release. It fails if the tag disagrees with the version in
-source, so a mislabelled build cannot ship. Rehearse from the Actions tab with
-`dry_run` left on.
+Windows and macOS, and builds the `.deb` on every push — installing it on a
+runner that has no tshark, then purging it and checking nothing is left behind,
+because packaging breaks quietly and release time is too late to find out. On a
+version tag it also builds `crowsnest.exe`, smoke-tests it, and publishes a
+Release carrying the exe, the `.deb` and the wheel. It fails if the tag
+disagrees with the version in source, so a mislabelled build cannot ship.
+Rehearse from the Actions tab with `dry_run` left on.
 
 ## Privacy
 

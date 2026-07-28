@@ -73,9 +73,52 @@ jobs:
               print("  ok", path.name)
           PY
 
+  package:
+    # The .deb must be built on Debian, and the release job runs on Windows for
+    # PyInstaller, so this gets its own job and hands the file over as an
+    # artifact. It runs on every push, not only on tags: packaging breaks
+    # quietly, and finding out at release time is finding out too late.
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build the package
+        run: packaging/build-deb.sh
+
+      - name: Install it the way a user would
+        run: |
+          # The runner has no tshark. If Depends is wrong, that fails here
+          # rather than on someone's Raspberry Pi.
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ./dist/crowsnest_*.deb
+          crowsnest --version
+          command -v tshark    # pulled in as a dependency, not by hand
+
+      - name: Remove it again, leaving nothing
+        run: |
+          # __pycache__ appears the moment the modules are imported, and dpkg
+          # does not own it -- without the maintainer scripts this leaves
+          # /usr/share/crowsnest behind.
+          sudo /usr/bin/crowsnest blocks || true
+          sudo apt-get purge -y crowsnest
+          test ! -e /usr/bin/crowsnest
+          test ! -e /usr/share/crowsnest
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: crowsnest-deb
+          path: dist/*.deb
+          if-no-files-found: error
+
   release:
     # Only for a tag, and only once every platform above is green.
-    needs: test
+    needs: [test, package]
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     steps:
@@ -134,6 +177,14 @@ jobs:
             exit 1
           fi
 
+      # Built on Linux by the package job above; collected here so one release
+      # carries all three.
+      - name: Fetch the Debian package
+        uses: actions/download-artifact@v5
+        with:
+          name: crowsnest-deb
+          path: dist
+
       - name: Upload artifact
         uses: actions/upload-artifact@v5
         with:
@@ -141,6 +192,7 @@ jobs:
           path: |
             dist/crowsnest.exe
             dist/*.whl
+            dist/*.deb
           if-no-files-found: error
 
       - name: Publish release
@@ -150,8 +202,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           wheel=$(ls dist/*.whl | head -1)
+          deb=$(ls dist/*.deb | head -1)
           gh release create "$GITHUB_REF_NAME" \
             --title "crowsnest ${{ steps.version.outputs.file }}" \
             --generate-notes \
             "dist/crowsnest.exe#crowsnest.exe (Windows, standalone)" \
+            "$deb#$(basename "$deb") (Debian, Raspberry Pi OS - pulls in tshark)" \
             "$wheel#$(basename "$wheel") (pip install, any platform)"
