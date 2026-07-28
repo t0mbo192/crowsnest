@@ -317,9 +317,7 @@ Check any time with `crowsnest update`.
 ## Releasing
 
 The version lives in [crowsnest_version.py](crowsnest_version.py). Pushing a tag
-does the rest — then update `url` and `sha256` in the
-[Homebrew tap](https://github.com/t0mbo192/homebrew-tap), which is the one thing
-not wired to the tag:
+does the rest:
 
 ```bash
 git tag v1.0.1 && git push origin main --tags
@@ -333,6 +331,13 @@ version tag it also builds `crowsnest.exe`, smoke-tests it, and publishes a
 Release carrying the exe, the `.deb` and the wheel. It fails if the tag
 disagrees with the version in source, so a mislabelled build cannot ship.
 Rehearse from the Actions tab with `dry_run` left on.
+
+The [Homebrew tap](https://github.com/t0mbo192/homebrew-tap) follows along by
+itself: it checks for a new release every six hours, rewrites the formula, and
+builds and runs it before committing, so a tag is the only thing anyone has to
+do. It lives in its own repository because that is what a tap is — Homebrew
+resolves `t0mbo192/tap/crowsnest` by cloning `t0mbo192/homebrew-tap` and reading
+the formulae inside it.
 
 ## Privacy
 
