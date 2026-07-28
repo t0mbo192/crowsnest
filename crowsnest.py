@@ -212,10 +212,20 @@ class Screen:
             self._held = lines
             return
         rows = max(4, term_height() - 1)
-        body = lines[:rows]
-        # Home, draw, then clear from the cursor down, so a shorter frame does
-        # not leave the tail of a longer one behind it.
-        sys.stdout.write(f"{ESC}H" + "\n".join(body) + f"{ESC}0J")
+        # Clipped both ways. Height alone is not enough: a line wider than the
+        # terminal wraps onto an extra screen row, which scrolls the frame and
+        # leaves the previous footer stranded above the new one. Trimming here
+        # means no renderer above can cause that, whatever it builds.
+        cols = term_width()
+        body = [visible_trim(line, cols) for line in lines[:rows]]
+        # Every line is erased to its end as it is drawn, then everything below
+        # the frame is cleared. Without the per-line erase, a line that grew
+        # shorter than the one it replaced kept the old tail: as hosts arrived
+        # the frame gained a row, the footer shifted down, and the short totals
+        # line was written over the long key hints -- leaving the hints showing
+        # twice until the frame stopped growing.
+        sys.stdout.write(f"{ESC}H" + f"{ESC}K\n".join(body)
+                         + f"{ESC}K" + f"{ESC}0J")
         sys.stdout.flush()
 
 
@@ -327,6 +337,34 @@ def visible_len(text: str) -> int:
     return len(ANSI_RE.sub("", text))
 
 
+def visible_trim(text: str, limit: int) -> str:
+    """Cut to `limit` columns on screen, keeping the colour codes intact.
+
+    A line wider than the terminal wraps onto a second screen row. The frame is
+    sized to fill the screen exactly, so one wrapped line pushes the bottom off,
+    the terminal scrolls, and the previous frame's footer is stranded above the
+    new one -- the dashboard appears to draw its key hints twice.
+    """
+    if limit <= 0:
+        return ""
+    if visible_len(text) <= limit:
+        return text
+    out, seen, pos, styled = [], 0, 0, False
+    for match in ANSI_RE.finditer(text):
+        if seen < limit:
+            chunk = text[pos:match.start()]
+            out.append(chunk[:limit - seen])
+            seen += min(len(chunk), limit - seen)
+        # Every code is kept, including ones past the cut, so a reset is never
+        # the thing that gets dropped and colour cannot leak into what follows.
+        out.append(match.group(0))
+        styled = True
+        pos = match.end()
+    if seen < limit:
+        out.append(text[pos:][:limit - seen])
+    return "".join(out) + (f"{ESC}0m" if styled else "")
+
+
 def box(title: str, body: list[str], width: int, glyphs: Glyphs,
         style: Style) -> list[str]:
     """Frame some lines, with the title set into the top edge."""
@@ -428,6 +466,11 @@ def render_dashboard(rows: list[dict], meta: dict, glyphs: Glyphs, style: Style,
         # One caption per line of art. Spare lines of art simply have nothing
         # beside them; spare captions are dropped rather than left to overflow.
         right = captions[i] if i < len(captions) else ""
+        # The facts on the right grow while a capture runs: the packet count and
+        # byte total climb, and a second address appears the moment traffic
+        # reveals one. Trimmed to the room actually beside the mark, since an
+        # overflowing caption wraps and takes the whole frame with it.
+        right = visible_trim(right, width - pad - 3)
         header.append(f" {line}{' ' * (pad - visible_len(line))}  {right}".rstrip())
 
     all_out = [r for r in rows if r["direction"].startswith("out")]
@@ -476,25 +519,39 @@ def render_dashboard(rows: list[dict], meta: dict, glyphs: Glyphs, style: Style,
                  panel_rows(inbound, width, in_limit, style, inbound=True,
                             filtered=bool(view.search)),
                  width, glyphs, style)
-    frame += footer(outbound, inbound, meta, glyphs, style, view)
+    frame += footer(outbound, inbound, meta, glyphs, style, view, width)
     return frame
 
 
+# Dropped from the right as the terminal narrows: better to advertise four keys
+# that fit than five that wrap and scroll the frame.
+KEY_HINTS = [("/", "search"), ("o", "outbound"), ("i", "inbound"),
+             ("c", "reset"), ("q", "quit")]
+
+
 def footer(outbound: list[dict], inbound: list[dict], meta: dict,
-           glyphs: Glyphs, style: Style, view: View) -> list[str]:
+           glyphs: Glyphs, style: Style, view: View, width: int) -> list[str]:
     """Totals, plus what the keys do -- the only place they are advertised."""
     if view.editing:
-        return [style("  search: ", Style.BOLD) + view.search +
+        edit = (style("  search: ", Style.BOLD) + view.search +
                 style("_", Style.BOLD) +
-                style("      Enter to keep it, Esc to clear", Style.DIM)]
+                style("      Enter to keep it, Esc to clear", Style.DIM))
+        return [visible_trim(edit, width)]
     left = (f"  {len(outbound) + len(inbound)} shown{glyphs.sep}"
             f"{core.human_bytes(meta.get('bytes', 0))} total")
     if view.search:
         left += f"{glyphs.sep}filter {view.search!r}"
     if view.expanded:
         left += f"{glyphs.sep}{'/'.join(sorted(view.expanded))} open"
-    keys = "  /  search    o  outbound    i  inbound    c  reset    q  quit"
-    return [style(left, Style.DIM), style(keys, Style.DIM)]
+
+    keys = ""
+    for key, what in KEY_HINTS:
+        piece = f"  {key}  {what}  "
+        if len(keys) + len(piece) > width:
+            break
+        keys += piece
+    return [style(visible_trim(left, width), Style.DIM),
+            style(keys.rstrip(), Style.DIM)]
 
 
 # -------------------------------------------------------------------- table

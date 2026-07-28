@@ -235,7 +235,7 @@ being stopped after the first contact.
 | [updater.py](updater.py) | Checks for a newer version. |
 | [install.sh](install.sh) / [install.ps1](install.ps1) | Installers for Linux/macOS and Windows. |
 | [pyproject.toml](pyproject.toml) | Package metadata, for the `pip`/`pipx` route. |
-| [test_core.py](test_core.py) / [test_blocking.py](test_blocking.py) / [test_gateway.py](test_gateway.py) | 81 tests, no network or capture needed. |
+| [test_core.py](test_core.py) / [test_blocking.py](test_blocking.py) / [test_gateway.py](test_gateway.py) / [test_dashboard.py](test_dashboard.py) | 101 tests, no network or capture needed. The dashboard ones replay real frames through a small terminal emulator, since a redraw bug is only visible once the escape sequences have been applied to a screen. |
 
 Standard library only, apart from the optional `maxminddb`. No display, no web
 server, no daemon.
