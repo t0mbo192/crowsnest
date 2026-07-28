@@ -35,7 +35,9 @@ TARGET="${BIN_DIR}/crowsnest"
 if [ "$UNINSTALL" = 1 ]; then
     # The desktop launcher belongs to the invoking user, not to root, when this
     # is re-run under sudo to remove a command installed system-wide.
-    uhome="${SUDO_USER:+$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)}"
+    # `|| true` because pipefail turns a missing getent -- macOS has none -- into
+    # a fatal error, aborting an uninstall that was about to succeed.
+    uhome="${SUDO_USER:+$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)}" || true
     launcher="${uhome:-$HOME}/.local/share/applications/crowsnest.desktop"
     if [ -e "$launcher" ]; then
         rm -f "$launcher"
@@ -107,12 +109,24 @@ if [ -z "$PYTHON" ]; then
 fi
 say "python" "$("$PYTHON" -V 2>&1) at $PYTHON"
 
-if ! command -v tshark >/dev/null 2>&1; then
+# The macOS cask installs tshark inside the app bundle, where PATH does not
+# reach it. crowsnest looks there before giving up, so refusing to install here
+# on a machine that has Wireshark would be stricter than the tool itself.
+MAC_TSHARK="/Applications/Wireshark.app/Contents/MacOS/tshark"
+TSHARK="$(command -v tshark 2>/dev/null || true)"
+if [ -z "$TSHARK" ] && [ -x "$MAC_TSHARK" ]; then
+    TSHARK="$MAC_TSHARK"
+    BUNDLED=1
+fi
+if [ -z "$TSHARK" ]; then
     printf '\ntshark is required -- crowsnest reads packets with it.\n\n'
     printf '    %s\n\n' "$TSHARK_HINT"
     fail "Re-run this script once tshark is installed."
 fi
-say "tshark" "$(command -v tshark)"
+say "tshark" "$TSHARK"
+if [ "${BUNDLED:-0}" = 1 ]; then
+    printf '        %s\n' "inside the app bundle -- crowsnest finds it, your shell will not"
+fi
 
 # --- capture permissions -----------------------------------------------------
 # Reading saved captures always works; capturing live traffic needs privileges.
@@ -168,13 +182,15 @@ esac
 # On a machine with a screen -- a Pi wired to a monitor, say -- a menu entry
 # that opens the dashboard in its own terminal window is the natural way to run
 # this. Skipped entirely on a headless box, where it would just be clutter.
-DESKTOP_HOME="${SUDO_USER:+$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)}"
+DESKTOP_HOME="${SUDO_USER:+$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)}" || true
 DESKTOP_HOME="${DESKTOP_HOME:-$HOME}"
 DESKTOP_DIR="${DESKTOP_HOME}/.local/share/applications"
 
 if [ "$PLATFORM" = "Linux" ] && [ -d "${DESKTOP_HOME}/.local/share" ]; then
-    # Watch whichever interface actually carries the default route.
-    IFACE="$(ip route show default 2>/dev/null | awk '/dev/ {for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')"
+    # Watch whichever interface actually carries the default route. `|| true`
+    # because pipefail makes an absent `ip` fatal, which killed the script here
+    # -- after the command was installed but before it said so.
+    IFACE="$(ip route show default 2>/dev/null | awk '/dev/ {for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')" || true
     IFACE="${IFACE:-eth0}"
     mkdir -p "$DESKTOP_DIR"
     cat > "${DESKTOP_DIR}/crowsnest.desktop" <<EOF
@@ -198,12 +214,25 @@ VERSION="$("$PYTHON" -c "import sys; sys.path.insert(0,'$REPO_DIR'); from crowsn
 
 printf '\nDone -- crowsnest %s is installed.\n\n' "$VERSION"
 if [ "$ON_PATH" = 0 ]; then
+    # Name the file this shell will actually read. zsh -- the default on macOS
+    # since Catalina -- never reads ~/.profile, so pointing everyone there sends
+    # Mac users to a file that is silently ignored, and the command stays missing.
+    case "$(basename "${SHELL:-sh}")" in
+        zsh)  PROFILE="${ZDOTDIR:-$HOME}/.zprofile" ;;
+        bash) [ "$PLATFORM" = "macOS" ] && PROFILE="$HOME/.bash_profile" \
+                                        || PROFILE="$HOME/.profile" ;;
+        *)    PROFILE="$HOME/.profile" ;;
+    esac
     printf '  %s is not on your PATH yet. Add it:\n\n' "$BIN_DIR"
-    printf '      echo '"'"'export PATH="%s:$PATH"'"'"' >> ~/.profile && . ~/.profile\n\n' "$BIN_DIR"
+    printf '      echo '"'"'export PATH="%s:$PATH"'"'"' >> %s && . %s\n\n' \
+        "$BIN_DIR" "$PROFILE" "$PROFILE"
 fi
+# Name an interface that exists here: Macs have no eth0, and a first command
+# that fails is a poor introduction.
+[ "$PLATFORM" = "macOS" ] && EXAMPLE_IFACE="en0" || EXAMPLE_IFACE="${IFACE:-eth0}"
 cat <<EOF
   See interfaces      crowsnest interfaces
-  Watch live          sudo crowsnest live -i eth0
+  Watch live          sudo crowsnest live -i $EXAMPLE_IFACE
   Read a capture      crowsnest read capture.pcapng
   Update              cd $REPO_DIR && git pull
   Uninstall           $REPO_DIR/install.sh --uninstall

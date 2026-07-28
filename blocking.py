@@ -37,6 +37,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 
 TABLE = "crowsnest"
 CHAIN = "input"
@@ -82,14 +83,23 @@ def nft_path() -> str | None:
 
 
 def nft_available() -> bool:
-    return os.name != "nt" and nft_path() is not None
+    # macOS is excluded by name rather than by failing to find nft: it filters
+    # with pf, so anything called nft there is not the tool this module drives.
+    return (os.name != "nt" and sys.platform != "darwin"
+            and nft_path() is not None)
 
 
 def unsupported_reason() -> str:
-    """Why blocking cannot run here, phrased for a user."""
+    """Why blocking cannot run here, phrased for a user.
+
+    Empty exactly when nft_available() is true, so the two cannot disagree.
+    """
     if os.name == "nt":
         return ("blocking currently supports Linux (nftables) only; Windows "
                 "firewall support is not implemented yet")
+    if sys.platform == "darwin":
+        return ("blocking currently supports Linux (nftables) only; macOS "
+                "filters with pf, which crowsnest does not write rules for")
     if nft_path() is None:
         return ("nft was not found. On Debian or Raspberry Pi OS: "
                 "sudo apt install nftables")

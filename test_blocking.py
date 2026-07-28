@@ -307,7 +307,11 @@ class TestPortability(unittest.TestCase):
         # and the CLI told the user to install what they already had.
         def exists(path):
             return path == "/usr/sbin/nft"
-        with mock.patch("os.name", "posix"),              mock.patch.object(blocking.shutil, "which", return_value=None),              mock.patch("os.path.isfile", side_effect=exists),              mock.patch("os.access", return_value=True):
+        with mock.patch("os.name", "posix"), \
+             mock.patch("sys.platform", "linux"), \
+             mock.patch.object(blocking.shutil, "which", return_value=None), \
+             mock.patch("os.path.isfile", side_effect=exists), \
+             mock.patch("os.access", return_value=True):
             self.assertEqual(blocking.nft_path(), "/usr/sbin/nft")
             self.assertTrue(blocking.nft_available())
 
@@ -317,10 +321,43 @@ class TestPortability(unittest.TestCase):
             self.assertEqual(blocking.nft_path(), "/usr/local/bin/nft")
 
     def test_missing_nft_explains_how_to_install(self):
+        # Pinned to Linux: the apt hint is only right there, and this suite runs
+        # on all three platforms in CI.
         with mock.patch("os.name", "posix"), \
+             mock.patch("sys.platform", "linux"), \
              mock.patch.object(blocking, "nft_path", return_value=None):
             self.assertFalse(blocking.nft_available())
             self.assertIn("apt install nftables", blocking.unsupported_reason())
+
+    def test_macos_is_reported_unsupported_without_apt_advice(self):
+        # macOS filters with pf, so "sudo apt install nftables" is advice that
+        # cannot be followed -- it reads as though blocking were one step away.
+        with mock.patch("os.name", "posix"), \
+             mock.patch("sys.platform", "darwin"):
+            self.assertFalse(blocking.nft_available())
+            reason = blocking.unsupported_reason()
+            self.assertIn("pf", reason)
+            self.assertNotIn("apt", reason)
+
+    def test_macos_stays_unsupported_even_if_something_called_nft_exists(self):
+        with mock.patch("os.name", "posix"), \
+             mock.patch("sys.platform", "darwin"), \
+             mock.patch.object(blocking, "nft_path", return_value="/usr/local/bin/nft"):
+            self.assertFalse(blocking.nft_available())
+
+    def test_availability_and_reason_never_disagree(self):
+        """A caller that can block must get no reason, and vice versa."""
+        for name, platform, nft in (("nt", "win32", "nft.exe"),
+                                    ("posix", "darwin", None),
+                                    ("posix", "darwin", "/usr/local/bin/nft"),
+                                    ("posix", "linux", None),
+                                    ("posix", "linux", "/usr/sbin/nft")):
+            with self.subTest(platform=platform, nft=nft):
+                with mock.patch("os.name", name), \
+                     mock.patch("sys.platform", platform), \
+                     mock.patch.object(blocking, "nft_path", return_value=nft):
+                    self.assertEqual(blocking.nft_available(),
+                                     blocking.unsupported_reason() == "")
 
 
 if __name__ == "__main__":

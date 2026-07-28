@@ -211,7 +211,11 @@ def find_tshark() -> str:
     exe = shutil.which("tshark")
     if exe:
         return exe
-    for c in (r"C:\Program Files\Wireshark\tshark.exe",
+    # Both desktop platforms install Wireshark somewhere PATH does not reach:
+    # inside the app bundle on macOS, under Program Files on Windows. Looking
+    # there beats telling someone to install what they have already got.
+    for c in ("/Applications/Wireshark.app/Contents/MacOS/tshark",
+              r"C:\Program Files\Wireshark\tshark.exe",
               r"C:\Program Files (x86)\Wireshark\tshark.exe"):
         if os.path.isfile(c):
             return c

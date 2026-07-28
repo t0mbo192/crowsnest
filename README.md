@@ -105,6 +105,12 @@ crowsnest asn 8.8.8.8                     # who owns an address?
 crowsnest update                          # is there a newer crowsnest?
 ```
 
+Interface names differ by platform — `eth0` or `wlan0` on Linux, `en0` for Wi-Fi
+on a Mac. `crowsnest interfaces` lists what is actually there. On macOS, live
+capture needs `sudo` unless Wireshark's ChmodBPF helper is installed, and
+`crowsnest block` does not apply: it writes nftables rules, and macOS filters
+with pf.
+
 In the dashboard: `/` search, `o` and `i` open or close a panel, `c` reset,
 `q` quit. Ten hosts a panel until you open one.
 

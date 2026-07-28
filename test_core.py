@@ -199,5 +199,34 @@ class TestAddressClassification(unittest.TestCase):
         self.assertIsNotNone(core.is_private.cache_info().maxsize)
 
 
+class TestFindTshark(unittest.TestCase):
+    """Wireshark installs off PATH on both desktop platforms."""
+
+    def test_path_is_preferred(self):
+        with mock.patch.object(core.shutil, "which", return_value="/opt/homebrew/bin/tshark"):
+            self.assertEqual(core.find_tshark(), "/opt/homebrew/bin/tshark")
+
+    def test_macos_app_bundle_is_searched(self):
+        # The Homebrew cask installs the app, whose tshark lives inside the
+        # bundle and is not on PATH -- so crowsnest claimed it was missing.
+        bundled = "/Applications/Wireshark.app/Contents/MacOS/tshark"
+        with mock.patch.object(core.shutil, "which", return_value=None), \
+             mock.patch("os.path.isfile", side_effect=lambda p: p == bundled):
+            self.assertEqual(core.find_tshark(), bundled)
+
+    def test_windows_install_is_still_searched(self):
+        installed = r"C:\Program Files\Wireshark\tshark.exe"
+        with mock.patch.object(core.shutil, "which", return_value=None), \
+             mock.patch("os.path.isfile", side_effect=lambda p: p == installed):
+            self.assertEqual(core.find_tshark(), installed)
+
+    def test_absent_everywhere_says_so(self):
+        with mock.patch.object(core.shutil, "which", return_value=None), \
+             mock.patch("os.path.isfile", return_value=False):
+            with self.assertRaises(RuntimeError) as caught:
+                core.find_tshark()
+        self.assertIn("Wireshark", str(caught.exception))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
