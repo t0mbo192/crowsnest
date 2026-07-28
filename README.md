@@ -45,34 +45,54 @@ Four things it does that a packet list does not:
 
 ## Install
 
-Every route gives you a `crowsnest` command on your PATH. All of them need
-[Wireshark](https://www.wireshark.org) installed, because crowsnest reads packets
-with its `tshark`.
+One line, on any of the three platforms.
 
 **Linux and macOS**
 
 ```bash
-git clone https://github.com/t0mbo192/crowsnest.git
-cd crowsnest && ./install.sh
+curl -fsSL https://raw.githubusercontent.com/t0mbo192/crowsnest/main/install.sh | bash
 ```
-
-Checks what you have, tells you the right command for anything missing (it never
-runs `sudo` itself), and installs a `crowsnest` shim into `~/.local/bin`. Because
-the shim points at the clone, `git pull` updates the command. `./install.sh
---uninstall` removes it; `--prefix DIR` puts it elsewhere.
 
 **Windows**
 
 ```powershell
-git clone https://github.com/t0mbo192/crowsnest.git
-cd crowsnest; .\install.ps1
+irm https://raw.githubusercontent.com/t0mbo192/crowsnest/main/install.ps1 | iex
 ```
 
-Installs to `%LOCALAPPDATA%\Programs\crowsnest` and adds that to your **user**
-PATH — no administrator rights, nothing machine-wide. Open a new terminal
-afterwards. Use `.\install.ps1 -Exe .\crowsnest.exe` to install a downloaded
-binary instead of running from source (no Python needed), and
-`.\install.ps1 -Uninstall` to remove both the command and the PATH entry.
+Either one fetches crowsnest, puts a `crowsnest` command on your PATH, and offers
+to install anything missing. Nothing is installed behind your back: the exact
+command is printed and run only if you say yes, so a machine with
+[Wireshark](https://www.wireshark.org) already on it is never asked anything.
+Wireshark is the one real prerequisite — crowsnest reads packets with its
+`tshark`.
+
+The source lands in `~/.local/share/crowsnest` (`%LOCALAPPDATA%\Programs\crowsnest`
+on Windows) and the command in `~/.local/bin`, per-user, no administrator rights
+and nothing machine-wide. `git` is used if you have it, so `git pull` updates
+you; a plain download is used if you do not, and re-running the line updates
+instead.
+
+To read the script before running it, clone and run it — it behaves identically:
+
+```bash
+git clone https://github.com/t0mbo192/crowsnest.git
+cd crowsnest && ./install.sh          # .\install.ps1 on Windows
+```
+
+Run that way, crowsnest runs from your clone and `git pull` is the update.
+
+| | Linux / macOS | Windows |
+|---|---|---|
+| unattended | `--yes` | `-Yes` |
+| install elsewhere | `--prefix DIR` | `-Prefix DIR` |
+| use a downloaded binary | — | `-Exe .\crowsnest.exe` (no Python needed) |
+| remove it again | `--uninstall` | `-Uninstall` |
+
+To pass one of those through the Windows one-liner, use the script block form:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/t0mbo192/crowsnest/main/install.ps1))) -Uninstall
+```
 
 **With pip, on any platform**
 
