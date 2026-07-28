@@ -152,7 +152,11 @@ if [ "$UNINSTALL" = 1 ]; then
         rm -rf "$SRC_DIR"
         printf 'Removed %s\n' "$SRC_DIR"
     fi
-    if [ "$BOOTSTRAP" = 0 ]; then
+    # Only when it really is a clone of your own. Uninstalling by running the
+    # fetched copy's own install.sh makes REPO_DIR and SRC_DIR the same path, and
+    # claiming it was left alone directly under "Removed" is a plain
+    # contradiction.
+    if [ "$BOOTSTRAP" = 0 ] && [ "$REPO_DIR" != "$SRC_DIR" ]; then
         printf 'The clone at %s is untouched; delete it if you want it gone.\n' "$REPO_DIR"
     fi
     printf '\n'
