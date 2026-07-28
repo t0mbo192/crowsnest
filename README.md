@@ -45,6 +45,17 @@ Four things it does that a packet list does not:
 
 ## Install
 
+**macOS** has a Homebrew tap:
+
+```bash
+brew install t0mbo192/tap/crowsnest
+```
+
+Homebrew pulls in Wireshark's `tshark` itself, so there is nothing to install
+first. It will ask you to trust the tap — `brew trust --formula
+t0mbo192/tap/crowsnest` — because a formula is code that runs on your machine.
+`brew uninstall crowsnest` removes it.
+
 **Debian, Ubuntu and Raspberry Pi OS** have a package. Download
 `crowsnest_<version>_all.deb` from
 [Releases](https://github.com/t0mbo192/crowsnest/releases) and:
@@ -306,7 +317,9 @@ Check any time with `crowsnest update`.
 ## Releasing
 
 The version lives in [crowsnest_version.py](crowsnest_version.py). Pushing a tag
-does the rest:
+does the rest — then update `url` and `sha256` in the
+[Homebrew tap](https://github.com/t0mbo192/homebrew-tap), which is the one thing
+not wired to the tag:
 
 ```bash
 git tag v1.0.1 && git push origin main --tags
