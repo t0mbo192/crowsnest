@@ -10,7 +10,11 @@
 #
 # Usage:
 #   sudo ./setup-wireguard.sh [--dry-run] [--port 51820] [--iface eth0]
+#   sudo ./setup-wireguard.sh --yes          answer yes to every prompt
 #   sudo ./setup-wireguard.sh --uninstall
+#
+# Anything missing is named with the exact command that installs it, and is
+# installed only if you say yes.
 
 set -euo pipefail
 
@@ -33,6 +37,7 @@ ENDPOINT_HOST=""
 # See the troubleshooting section of docs/cellular.md before setting this.
 MTU=""
 QR_ONLY=0
+ASSUME_YES=0
 # NAT lives in its own table so that dropping crowsnest's table -- which
 # `crowsnest unblock --all` does -- cannot take the Pi's routing with it.
 NAT_TABLE=crowsnest_nat
@@ -40,6 +45,7 @@ NAT_TABLE=crowsnest_nat
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run)   DRY_RUN=1 ;;
+    -y|--yes)    ASSUME_YES=1 ;;
     --uninstall) UNINSTALL=1 ;;
     --port)      PORT="$2"; shift ;;
     --iface)     WAN_IFACE="$2"; shift ;;
@@ -55,6 +61,24 @@ done
 
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
+
+ask() {
+  [ "$ASSUME_YES" = 1 ] && return 0
+  local reply=""
+  printf '%s [y/N] ' "$1"
+  # Read the terminal directly: this runs under sudo and may be invoked with its
+  # stdin pointed somewhere unhelpful, and silence must not read as consent.
+  if { exec 3</dev/tty; } 2>/dev/null; then
+    read -r reply <&3 || reply=""
+    exec 3<&-
+  elif [ -t 0 ]; then
+    read -r reply || reply=""
+  else
+    printf 'no terminal to ask on, assuming no\n'
+    return 1
+  fi
+  case "$reply" in [Yy]|[Yy][Ee][Ss]) return 0 ;; *) return 1 ;; esac
+}
 
 run() {
   if [ "$DRY_RUN" = 1 ]; then
@@ -174,32 +198,65 @@ fi
 # ------------------------------------------------------------ prerequisites
 say "Checking prerequisites"
 
-MISSING=()
-for pkg_cmd in "wireguard-tools:wg" "nftables:nft" "tshark:tshark" "qrencode:qrencode"; do
-  pkg="${pkg_cmd%%:*}"; cmd="${pkg_cmd##*:}"
-  if command -v "$cmd" >/dev/null 2>&1; then
-    note "found $cmd"
-  else
-    note "MISSING $cmd (package: $pkg)"
-    MISSING+=("$pkg")
-  fi
-done
+PACKAGES=("wireguard-tools:wg" "nftables:nft" "tshark:tshark" "qrencode:qrencode")
+
+find_missing() {
+  MISSING=()
+  local pkg_cmd pkg cmd
+  for pkg_cmd in "${PACKAGES[@]}"; do
+    pkg="${pkg_cmd%%:*}"; cmd="${pkg_cmd##*:}"
+    if command -v "$cmd" >/dev/null 2>&1; then
+      [ "${1:-}" = "quiet" ] || note "found $cmd"
+    else
+      [ "${1:-}" = "quiet" ] || note "MISSING $cmd (package: $pkg)"
+      MISSING+=("$pkg")
+    fi
+  done
+}
+
+find_missing
 
 if [ ${#MISSING[@]} -gt 0 ]; then
+  # Offered rather than reported. This script already runs as root, so there is
+  # no extra privilege in doing it here -- only the difference between one
+  # command and three. What is printed is exactly what runs.
+  INSTALL_CMD="apt-get update && apt-get install -y ${MISSING[*]}"
   echo
-  echo "Install what's missing, then run this again:"
+  echo "  Not installed yet:  ${MISSING[*]}"
   echo
-  echo "  sudo apt update && sudo apt install -y ${MISSING[*]}"
+  echo "      $INSTALL_CMD"
   echo
-  echo "tshark will ask whether non-root users may capture. Answering yes and"
-  echo "running 'sudo usermod -aG wireshark \$USER' lets crowsnest run without sudo."
+  echo "  tshark will ask whether non-root users may capture. Answering yes, and"
+  echo "  then 'sudo usermod -aG wireshark \$USER', lets crowsnest run without sudo."
+  echo
   # A dry run is for reading what would happen, so it continues past this --
   # useful for previewing the whole thing from a machine that is not the Pi.
-  if [ "$DRY_RUN" = 0 ]; then
+  if [ "$DRY_RUN" = 1 ]; then
+    note "[dry run] would offer to run that"
+  elif ask "  Run that now?"; then
+    echo
+    # --yes means unattended, and debconf would otherwise stop on tshark's
+    # question and wait for a keypress that is never coming.
+    [ "$ASSUME_YES" = 1 ] && export DEBIAN_FRONTEND=noninteractive
+    sh -c "$INSTALL_CMD" || {
+      echo "that command failed -- install them yourself, then run this again" >&2
+      exit 1
+    }
+    find_missing quiet
+    if [ ${#MISSING[@]} -gt 0 ]; then
+      echo "still missing after installing: ${MISSING[*]}" >&2
+      exit 1
+    fi
+    note "installed"
+  else
+    echo
+    echo "Nothing was installed. Run this again when you are ready."
     exit 1
   fi
-  echo
-  note "continuing anyway because this is a dry run"
+  if [ "$DRY_RUN" = 1 ]; then
+    echo
+    note "continuing anyway because this is a dry run"
+  fi
 fi
 
 # Work out which interface reaches the internet, if not given.
