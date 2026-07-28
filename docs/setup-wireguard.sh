@@ -53,7 +53,9 @@ while [ $# -gt 0 ]; do
     --endpoint)  ENDPOINT_HOST="$2"; shift ;;
     --mtu)       MTU="$2"; shift ;;
     --qr-only)   QR_ONLY=1 ;;
-    -h|--help)   sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    # Through to the consent note: --help that stops before the one thing the
+    # script does to your system would be worse than no --help.
+    -h|--help)   sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift

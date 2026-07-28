@@ -12,6 +12,11 @@ The reward is worth the fiddling. On the home network you are watching a phone
 that is mostly idle and on wifi. On cellular you are watching it do what it
 actually does all day.
 
+> **Where the script lives.** Installed from the `.deb`, it is at
+> `/usr/share/doc/crowsnest/examples/setup-wireguard.sh`. From a git clone it is
+> `./docs/setup-wireguard.sh`. The commands below use the packaged path; swap in
+> whichever you have.
+
 ## First: can you do this at all?
 
 Some connections cannot accept an incoming one, no matter how you configure
@@ -78,7 +83,7 @@ If your router insists on a range, use 51820 to 51820.
 Back on the Pi:
 
 ```bash
-sudo ./docs/setup-wireguard.sh --qr-only --endpoint yourname.duckdns.org
+sudo /usr/share/doc/crowsnest/examples/setup-wireguard.sh --qr-only --endpoint yourname.duckdns.org
 ```
 
 This only rewrites the phone's config and prints a new QR code. It does not
@@ -167,7 +172,7 @@ header, so a full-size packet no longer fits, and on some cellular networks the
 small pages working and large ones stalling.
 
 ```bash
-sudo ./docs/setup-wireguard.sh --qr-only --endpoint yourname.duckdns.org --mtu 1280
+sudo /usr/share/doc/crowsnest/examples/setup-wireguard.sh --qr-only --endpoint yourname.duckdns.org --mtu 1280
 ```
 
 1280 is the safe floor for IPv6 and works essentially everywhere. Re-scan.

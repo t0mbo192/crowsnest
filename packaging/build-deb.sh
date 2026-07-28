@@ -6,7 +6,7 @@
 #
 # Produces dist/crowsnest_<version>_all.deb, which installs like this:
 #
-#   sudo apt install ./crowsnest_1.0.0_all.deb
+#   sudo apt install ./crowsnest_<version>_all.deb
 #
 # apt then pulls tshark in as a dependency, which is the whole point: on Debian
 # and Raspberry Pi OS that turns the one real prerequisite into something the

@@ -1,13 +1,15 @@
 """Tell the user when a newer crowsnest exists.
 
-Two routes, matching how crowsnest actually gets deployed:
+Two checks, covering every way crowsnest gets installed:
 
-  * **Running from a git clone** (the Raspberry Pi) -- compares the checkout
-    against its upstream branch. Updating is `git pull`; the app is pure Python
-    so there is no build step.
-  * **Running as an installed build** (the Windows .exe) -- reads the latest
-    GitHub Release and compares version numbers. Updating means downloading the
-    installer and running it.
+  * **Running from a git clone** -- compares the checkout against its upstream
+    branch. Updating is `git pull`; the app is pure Python so there is no build
+    step. This covers the clone route and the one-line installers, which put a
+    shim in front of a clone.
+  * **Anything else** -- reads the latest GitHub Release and compares version
+    numbers. How to act on that depends on the route: `brew upgrade crowsnest`,
+    a newer .deb from Releases, `pipx upgrade crowsnest`, or a fresh
+    crowsnest.exe.
 
 Nothing is ever downloaded or installed automatically. This module only reports
 what it finds; the user decides what to do. Every function is safe to call from

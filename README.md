@@ -224,8 +224,12 @@ gateway itself. Naming the device's address makes *outbound* mean "from that
 device", which is what you want to read.
 
 [docs/setup-wireguard.sh](docs/setup-wireguard.sh) sets a Pi up that way —
-prerequisites, keys, forwarding, NAT, and a QR code for the phone. It has
-`--dry-run` and `--uninstall`, and installs nothing on its own.
+prerequisites, keys, forwarding, NAT, and a QR code for the phone. It names
+anything missing, shows the exact command, and installs it only if you say yes.
+`--dry-run` prints every step without running any of it; `--uninstall` undoes
+the lot. Installed from the `.deb` it lives at
+`/usr/share/doc/crowsnest/examples/setup-wireguard.sh`, so the package alone is
+enough to set the tunnel up.
 
 That gets you a tunnel that works at home. [docs/cellular.md](docs/cellular.md)
 covers the rest: giving the Pi a name that reaches it from outside, what to do
@@ -276,7 +280,8 @@ being stopped after the first contact.
 | [asn_lookup.py](asn_lookup.py) | Names the organisation behind an address, offline. |
 | [blocking.py](blocking.py) | Writes and removes nftables rules, with guardrails. |
 | [gateway.py](gateway.py) | The same, on the forward chain, for a device routed through this machine. |
-| [docs/setup-wireguard.sh](docs/setup-wireguard.sh) | Sets a Raspberry Pi up as a WireGuard gateway to watch. |
+| [docs/setup-wireguard.sh](docs/setup-wireguard.sh) | Sets a Raspberry Pi up as a WireGuard gateway to watch. Ships in the `.deb` too, under `/usr/share/doc/crowsnest/examples/`. |
+| [docs/cellular.md](docs/cellular.md) | Getting that tunnel to work away from home, and how to tell when your ISP will not allow it. |
 | [updater.py](updater.py) | Checks for a newer version. |
 | [install.sh](install.sh) / [install.ps1](install.ps1) | Installers for Linux/macOS and Windows, runnable straight from a URL. |
 | [packaging/build-deb.sh](packaging/build-deb.sh) | Builds the Debian package. Takes its file list from `pyproject.toml` so the two cannot drift. |
@@ -306,13 +311,17 @@ deadline.
 crowsnest tells you on startup when a newer version exists, and never installs
 anything itself.
 
-| Install | Update |
+| Installed with | Update |
 |---|---|
+| Homebrew | `brew upgrade crowsnest` |
+| the `.deb` | download the new one from Releases and `apt install ./…deb` over it |
+| the `curl` / `irm` one-liner | run the same line again |
 | `install.sh` / `install.ps1` from a clone | `git pull` — the shim points at the clone |
 | `pipx` | `pipx upgrade crowsnest` |
 | `crowsnest.exe` | download the new one from Releases |
 
-Check any time with `crowsnest update`.
+Check any time with `crowsnest update`. It compares against your clone's
+upstream when you have one, and against the latest Release otherwise.
 
 ## Releasing
 
@@ -320,7 +329,7 @@ The version lives in [crowsnest_version.py](crowsnest_version.py). Pushing a tag
 does the rest:
 
 ```bash
-git tag v1.0.1 && git push origin main --tags
+git tag v1.1.2 && git push origin main --tags
 ```
 
 [The workflow](.github/workflows/ci.yml) tests every pull request on Linux,
