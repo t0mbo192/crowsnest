@@ -1,4 +1,4 @@
-# crowsnest
+﻿# crowsnest
 
 **Wireshark tells you everything. crowsnest tells you who.**
 
@@ -11,15 +11,15 @@ By default it does not draw a dashboard at all. It reports each host **once**,
 when it first appears, and then says nothing:
 
 ```
-crowsnest live  ·  eth0  ·  this machine 192.168.1.120
+crowsnest live  Â·  eth0  Â·  this machine 192.168.1.120
   each host is reported once, when first seen. Ctrl-C for a summary.
 
-  08:22:13  ↑  github.com                     GitHub - code hosting
-  08:22:13  ↑  ord37s57-in-f10.1e100.net      Google infrastructure
-  08:22:13  ↑  browser-intake-datadoghq.com   Datadog - monitoring / telemetry
-  08:22:14  ↑  20.42.65.92                    Microsoft Corporation
-  08:22:19  ↓  laptop.lan                     Local network device
-  08:22:24  ↓  203.0.113.5                    DigitalOcean, LLC
+  08:22:13  â†‘  github.com                     GitHub - code hosting
+  08:22:13  â†‘  ord37s57-in-f10.1e100.net      Google infrastructure
+  08:22:13  â†‘  browser-intake-datadoghq.com   Datadog - monitoring / telemetry
+  08:22:14  â†‘  20.42.65.92                    Microsoft Corporation
+  08:22:19  â†“  laptop.lan                     Local network device
+  08:22:24  â†“  203.0.113.5                    DigitalOcean, LLC
 ```
 
 `--dashboard` gives you the framed view above, with transfer rates, a search
@@ -28,10 +28,10 @@ box, and panels you can open and close.
 Four things it does that a packet list does not:
 
 - **Reports each host once.** One line when a host first appears, then silence.
-  Nothing redraws, nothing scrolls past, nothing repeats — the opposite of a
+  Nothing redraws, nothing scrolls past, nothing repeats â€” the opposite of a
   monitor you have to keep staring at.
 - **Splits by direction.** Outbound means this machine started the connection;
-  inbound means something else did. Taken from the TCP handshake — whoever sends
+  inbound means something else did. Taken from the TCP handshake â€” whoever sends
   the opening SYN is the initiator.
 - **Says what each host is.** A curated table names what a host is *for*
   ("Datadog - monitoring / telemetry"), and an offline ASN database names the
@@ -52,8 +52,8 @@ brew install t0mbo192/tap/crowsnest
 ```
 
 Homebrew pulls in Wireshark's `tshark` itself, so there is nothing to install
-first. It will ask you to trust the tap — `brew trust --formula
-t0mbo192/tap/crowsnest` — because a formula is code that runs on your machine.
+first. It will ask you to trust the tap â€” `brew trust --formula
+t0mbo192/tap/crowsnest` â€” because a formula is code that runs on your machine.
 `brew uninstall crowsnest` removes it.
 
 **Debian, Ubuntu and Raspberry Pi OS** have a package. Download
@@ -61,11 +61,11 @@ t0mbo192/tap/crowsnest` — because a formula is code that runs on your machine.
 [Releases](https://github.com/t0mbo192/crowsnest/releases) and:
 
 ```bash
-sudo apt install ./crowsnest_1.1.0_all.deb
+sudo apt install ./crowsnest_1.1.1_all.deb
 ```
 
 apt pulls in `tshark` itself, so there is no prerequisite to go and install
-first — that one command ends with a working `crowsnest`. It also brings in
+first â€” that one command ends with a working `crowsnest`. It also brings in
 `nftables` and `python3-maxminddb`, so blocking and organisation names work out
 of the box (`--no-install-recommends` if you would rather they did not).
 `sudo apt purge crowsnest` removes it completely.
@@ -88,7 +88,7 @@ Either one fetches crowsnest, puts a `crowsnest` command on your PATH, and offer
 to install anything missing. Nothing is installed behind your back: the exact
 command is printed and run only if you say yes, so a machine with
 [Wireshark](https://www.wireshark.org) already on it is never asked anything.
-Wireshark is the one real prerequisite — crowsnest reads packets with its
+Wireshark is the one real prerequisite â€” crowsnest reads packets with its
 `tshark`.
 
 The source lands in `~/.local/share/crowsnest` (`%LOCALAPPDATA%\Programs\crowsnest`
@@ -97,7 +97,7 @@ and nothing machine-wide. `git` is used if you have it, so `git pull` updates
 you; a plain download is used if you do not, and re-running the line updates
 instead.
 
-To read the script before running it, clone and run it — it behaves identically:
+To read the script before running it, clone and run it â€” it behaves identically:
 
 ```bash
 git clone https://github.com/t0mbo192/crowsnest.git
@@ -110,7 +110,7 @@ Run that way, crowsnest runs from your clone and `git pull` is the update.
 |---|---|---|
 | unattended | `--yes` | `-Yes` |
 | install elsewhere | `--prefix DIR` | `-Prefix DIR` |
-| use a downloaded binary | — | `-Exe .\crowsnest.exe` (no Python needed) |
+| use a downloaded binary | â€” | `-Exe .\crowsnest.exe` (no Python needed) |
 | remove it again | `--uninstall` | `-Uninstall` |
 
 To pass one of those through the Windows one-liner, use the script block form:
@@ -127,7 +127,7 @@ crowsnest is a normal Python package, so if you would rather not use the scripts
 pipx install git+https://github.com/t0mbo192/crowsnest.git
 ```
 
-`pipx` is the safe choice — plain `pip install` into a system Python is blocked
+`pipx` is the safe choice â€” plain `pip install` into a system Python is blocked
 on Debian and Raspberry Pi OS ([PEP 668](https://peps.python.org/pep-0668/)).
 Add `[asn]` (`pipx install "crowsnest[asn] @ git+..."`) to pull in `maxminddb`
 at the same time.
@@ -150,7 +150,7 @@ crowsnest asn 8.8.8.8                     # who owns an address?
 crowsnest update                          # is there a newer crowsnest?
 ```
 
-Interface names differ by platform — `eth0` or `wlan0` on Linux, `en0` for Wi-Fi
+Interface names differ by platform â€” `eth0` or `wlan0` on Linux, `en0` for Wi-Fi
 on a Mac. `crowsnest interfaces` lists what is actually there. On macOS, live
 capture needs `sudo` unless Wireshark's ChmodBPF helper is installed, and
 `crowsnest block` does not apply: it writes nftables rules, and macOS filters
@@ -183,12 +183,12 @@ sudo crowsnest unblock 203.0.113.5       # or --all
 Every one of those **prints the exact `nft` command and waits for a yes**.
 `--dry-run` shows what would happen and stops. Rules go into crowsnest's own
 `crowsnest` nftables table, so your existing firewall config is never read,
-rewritten, or flushed — and removing a block cannot disturb anything else.
+rewritten, or flushed â€” and removing a block cannot disturb anything else.
 
 Blocks last **until reboot**. That is deliberate: a reboot is your escape hatch
 if you shut out something you needed. `--persist` records a block so
 `crowsnest blocks --restore` can reapply it, and prints the systemd unit to do
-that automatically — crowsnest will not install a service behind your back.
+that automatically â€” crowsnest will not install a service behind your back.
 
 crowsnest refuses to block three things unless you pass `--force`, because
 blocking them breaks the machine rather than protecting it:
@@ -200,18 +200,18 @@ blocking them breaks the machine rather than protecting it:
 | your current SSH peer | locks you out of a headless machine |
 
 > **What blocking can and cannot do.** crowsnest watches a passive copy of
-> traffic, so a block stops everything *after* it — it cannot prevent the first
+> traffic, so a block stops everything *after* it â€” it cannot prevent the first
 > contact that revealed the host. That suits a peer that keeps knocking; it is
 > not an inline firewall. Blocking a *hostname* blocks the addresses it resolves
 > to **right now**, so a host that moves will need blocking again.
 
-Live capture needs privileges — run under `sudo`, or
+Live capture needs privileges â€” run under `sudo`, or
 `sudo usermod -aG wireshark $USER` and log back in.
 
 ### Watching another device
 
 Point crowsnest at a router interface and it reports what everything *behind*
-that interface is talking to — a phone, a TV, a games console, anything that
+that interface is talking to â€” a phone, a TV, a games console, anything that
 cannot run crowsnest itself. On a Raspberry Pi acting as a WireGuard gateway:
 
 ```bash
@@ -223,7 +223,7 @@ it is watching by taking the busiest endpoint, and on a gateway that is the
 gateway itself. Naming the device's address makes *outbound* mean "from that
 device", which is what you want to read.
 
-[docs/setup-wireguard.sh](docs/setup-wireguard.sh) sets a Pi up that way —
+[docs/setup-wireguard.sh](docs/setup-wireguard.sh) sets a Pi up that way â€”
 prerequisites, keys, forwarding, NAT, and a QR code for the phone. It has
 `--dry-run` and `--uninstall`, and installs nothing on its own.
 
@@ -247,7 +247,7 @@ Addresses go into nftables named sets rather than one rule each, so the ruleset
 stays four rules wide however many hosts accumulate.
 
 Two guardrails are added on top of the usual ones. `--client` names the
-device's own address so it cannot be cut off by accident — an easy mistake,
+device's own address so it cannot be cut off by accident â€” an easy mistake,
 since the device is right there in crowsnest's own output. And a handful of
 hostnames are refused because blocking them breaks the device rather than
 protecting it:
@@ -259,7 +259,7 @@ protecting it:
 | `time.apple.com` | a device with a wrong clock fails TLS almost everywhere |
 | `*.apple-dns.net` | breaks iCloud, the App Store and Find My |
 
-Those are matched on the name as typed, before it is resolved — Apple push runs
+Those are matched on the name as typed, before it is resolved â€” Apple push runs
 over a range too wide to enumerate and its addresses rotate.
 
 Unlike blocking for this machine, a gateway block is **inline**: the traffic is
@@ -271,7 +271,7 @@ being stopped after the first contact.
 | File | |
 |---|---|
 | [crowsnest.py](crowsnest.py) | The command line: every subcommand and all terminal output. |
-| [crowsnest_core.py](crowsnest_core.py) | Analysis — direction, host names, descriptions, live tracking. No terminal or display assumptions. |
+| [crowsnest_core.py](crowsnest_core.py) | Analysis â€” direction, host names, descriptions, live tracking. No terminal or display assumptions. |
 | [crowsnest_banner.py](crowsnest_banner.py) | The mark at the top of the dashboard. |
 | [asn_lookup.py](asn_lookup.py) | Names the organisation behind an address, offline. |
 | [blocking.py](blocking.py) | Writes and removes nftables rules, with guardrails. |
@@ -308,7 +308,7 @@ anything itself.
 
 | Install | Update |
 |---|---|
-| `install.sh` / `install.ps1` from a clone | `git pull` — the shim points at the clone |
+| `install.sh` / `install.ps1` from a clone | `git pull` â€” the shim points at the clone |
 | `pipx` | `pipx upgrade crowsnest` |
 | `crowsnest.exe` | download the new one from Releases |
 
@@ -324,7 +324,7 @@ git tag v1.0.1 && git push origin main --tags
 ```
 
 [The workflow](.github/workflows/ci.yml) tests every pull request on Linux,
-Windows and macOS, and builds the `.deb` on every push — installing it on a
+Windows and macOS, and builds the `.deb` on every push â€” installing it on a
 runner that has no tshark, then purging it and checking nothing is left behind,
 because packaging breaks quietly and release time is too late to find out. On a
 version tag it also builds `crowsnest.exe`, smoke-tests it, and publishes a
@@ -335,14 +335,14 @@ Rehearse from the Actions tab with `dry_run` left on.
 The [Homebrew tap](https://github.com/t0mbo192/homebrew-tap) follows along by
 itself: it checks for a new release every six hours, rewrites the formula, and
 builds and runs it before committing, so a tag is the only thing anyone has to
-do. It lives in its own repository because that is what a tap is — Homebrew
+do. It lives in its own repository because that is what a tap is â€” Homebrew
 resolves `t0mbo192/tap/crowsnest` by cloning `t0mbo192/homebrew-tap` and reading
 the formulae inside it.
 
 ## Privacy
 
 Captures contain real addresses and browsing history, so `*.pcap*` is
-git-ignored and never committed. ASN lookups are local — no address leaves the
+git-ignored and never committed. ASN lookups are local â€” no address leaves the
 machine, and crowsnest works with no network at all.
 
 ## Licence
@@ -353,7 +353,7 @@ The ASN database is not part of this repository and is not redistributed by it;
 `crowsnest asn --fetch` downloads it from the publisher. DB-IP's licence requires
 attribution:
 
-> IP-to-ASN data by [DB-IP](https://db-ip.com) — licensed under
+> IP-to-ASN data by [DB-IP](https://db-ip.com) â€” licensed under
 > [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 MaxMind's GeoLite2-ASN works instead if you have it, under its own

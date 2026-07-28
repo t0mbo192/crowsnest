@@ -170,6 +170,15 @@ chmod 755 "$PKG/DEBIAN/postinst" "$PKG/DEBIAN/prerm" "$PKG/DEBIAN/postrm"
 } > "$PKG/usr/share/doc/crowsnest/copyright"
 chmod 644 "$PKG/usr/share/doc/crowsnest/copyright"
 
+# The gateway helper ships too. Watching a phone is a headline feature, and
+# without this a packaged install has no way to set the tunnel up -- the script
+# would only exist in a git clone the user was told they did not need.
+install -d "$PKG/usr/share/doc/crowsnest/examples"
+install -m 755 "$ROOT/docs/setup-wireguard.sh" \
+    "$PKG/usr/share/doc/crowsnest/examples/setup-wireguard.sh"
+install -m 644 "$ROOT/docs/cellular.md" \
+    "$PKG/usr/share/doc/crowsnest/examples/cellular.md"
+
 cat > "$STAGE/changelog" <<EOF
 crowsnest ($VERSION) stable; urgency=medium
 
