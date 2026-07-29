@@ -61,7 +61,7 @@ t0mbo192/tap/crowsnest` — because a formula is code that runs on your machine.
 [Releases](https://github.com/t0mbo192/crowsnest/releases) and:
 
 ```bash
-sudo apt install ./crowsnest_1.1.2_all.deb
+sudo apt install ./crowsnest_1.1.3_all.deb
 ```
 
 apt pulls in `tshark` itself, so there is no prerequisite to go and install
@@ -329,7 +329,7 @@ The version lives in [crowsnest_version.py](crowsnest_version.py). Pushing a tag
 does the rest:
 
 ```bash
-git tag v1.1.3 && git push origin main --tags
+git tag v1.1.4 && git push origin main --tags
 ```
 
 [The workflow](.github/workflows/ci.yml) tests every pull request on Linux,
