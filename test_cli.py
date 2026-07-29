@@ -43,10 +43,16 @@ class TestConsoleOwnership(unittest.TestCase):
             self.assertFalse(c.owns_the_console())
 
     def test_a_missing_console_is_not_an_error(self):
-        """Frozen with no console attached, asking must fail quietly."""
+        """Frozen with no console attached, asking must fail quietly.
+
+        The import is blocked rather than ctypes.windll being mocked: patching
+        os.name to "nt" makes a *fresh* import of ctypes take its Windows
+        branch, which on Linux dies reaching for _ctypes.FormatError. That is
+        how this test failed on two of the three CI platforms and passed on the
+        one it was written on.
+        """
         with mock.patch("os.name", "nt"), \
-             mock.patch("ctypes.windll", create=True,
-                        side_effect=AttributeError("no windll")):
+             mock.patch.dict(sys.modules, {"ctypes": None}):
             self.assertFalse(c.owns_the_console())
 
 
