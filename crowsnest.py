@@ -1209,20 +1209,28 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def owns_the_console() -> bool:
-    """True when this process is the only thing attached to its console.
+    """True when this console exists only for us.
 
-    Which means Explorer made the window for us -- someone double-clicked
+    Which means Explorer made the window -- someone double-clicked
     crowsnest.exe -- and it closes the instant we return, taking whatever we
     printed with it. Started from a shell, the shell is attached too, so the
     count is higher and the window is not ours to hold open.
+
+    The frozen build is not one process but two: PyInstaller's onefile
+    bootloader unpacks the bundle and runs the real program as a child, and both
+    stay attached. Measured on a double-clicked crowsnest.exe the count is 2,
+    and from a shell it is 4, so the line sits between them. Running from source
+    there is no bootloader and the count is 1. Getting this wrong is invisible
+    from a terminal, which is how the first attempt shipped.
     """
     if os.name != "nt":
         return False
+    alone = 2 if getattr(sys, "frozen", False) else 1
     try:
         import ctypes
-        buffer = (ctypes.c_uint * 4)()
-        attached = ctypes.windll.kernel32.GetConsoleProcessList(buffer, 4)
-        return attached == 1
+        buffer = (ctypes.c_uint * 8)()
+        attached = ctypes.windll.kernel32.GetConsoleProcessList(buffer, 8)
+        return 0 < attached <= alone
     except Exception:                  # no console, or no kernel32 to ask
         return False
 

@@ -14,7 +14,7 @@ from __future__ import annotations
 import io
 import sys
 import unittest
-from contextlib import redirect_stdout, redirect_stderr
+from contextlib import contextmanager, redirect_stdout, redirect_stderr
 from unittest import mock
 
 import crowsnest as c
@@ -36,11 +36,39 @@ def run_main(argv, held):
             "out": out.getvalue(), "err": err.getvalue()}
 
 
+@contextmanager
+def attached(count, frozen):
+    """Pretend Windows reports `count` processes on our console."""
+    windll = mock.Mock()
+    windll.kernel32.GetConsoleProcessList.return_value = count
+    with mock.patch("os.name", "nt"), \
+         mock.patch.object(sys, "frozen", frozen, create=True), \
+         mock.patch("ctypes.windll", windll, create=True):
+        yield
+
+
 class TestConsoleOwnership(unittest.TestCase):
     def test_never_holds_the_window_off_windows(self):
         """No Explorer, no orphaned console -- and no ctypes call to make."""
         with mock.patch("os.name", "posix"):
             self.assertFalse(c.owns_the_console())
+
+    def test_counts_measured_on_a_real_double_click(self):
+        """The frozen build is a bootloader plus a child, so its own console
+        holds two processes, not one. Both numbers were measured rather than
+        assumed: 2 double-clicked, 4 from a shell.
+        """
+        cases = [
+            (1, False, True,  "source, own console"),
+            (2, False, False, "source, started from a shell"),
+            (2, True,  True,  "frozen exe, double-clicked"),
+            (4, True,  False, "frozen exe, from a shell"),
+            (1, True,  True,  "frozen onedir, own console"),
+        ]
+        for count, frozen, expected, label in cases:
+            with self.subTest(case=label):
+                with attached(count, frozen):
+                    self.assertEqual(c.owns_the_console(), expected)
 
     def test_a_missing_console_is_not_an_error(self):
         """Frozen with no console attached, asking must fail quietly.
