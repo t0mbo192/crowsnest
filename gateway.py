@@ -293,9 +293,13 @@ def forget_record(addresses: list[str] | None = None) -> None:
 
 
 def _write_record(addresses: list[str]) -> None:
+    # Same as blocking's: written by root into the user's own home, so it is
+    # handed back rather than left root-owned.
+    from asn_lookup import give_back_to_invoker
     os.makedirs(blocking.RECORD_DIR, exist_ok=True)
     with open(RECORD_PATH, "w", encoding="utf-8") as f:
         json.dump({"blocked": addresses}, f, indent=2)
+    give_back_to_invoker(blocking.RECORD_DIR, RECORD_PATH)
 
 
 def restore_hint() -> str:

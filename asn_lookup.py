@@ -42,6 +42,10 @@ DB_FILENAMES = ("dbip-asn-lite.mmdb", "GeoLite2-ASN.mmdb", "dbip-asn.mmdb")
 # DB-IP publish a fresh free database each month.
 DBIP_URL = "https://download.db-ip.com/free/dbip-asn-lite-{ym}.mmdb.gz"
 
+# The database is around 10 MB. This is the ceiling on what --fetch will write,
+# so a wrong or hostile response cannot fill the disk by decompressing.
+MAX_DB_BYTES = 256 << 20
+
 _lock = threading.Lock()
 _reader = None            # opened maxminddb reader, or False once known bad
 _cache: dict[str, tuple[int, str] | None] = {}
@@ -64,6 +68,30 @@ def invoking_user_home() -> str | None:
         return pwd.getpwnam(user).pw_dir
     except (ImportError, KeyError):
         return None
+
+
+def give_back_to_invoker(*paths: str) -> None:
+    """Hand files created under sudo back to the user who ran it.
+
+    Live capture and blocking both need root, so anything crowsnest writes while
+    doing them lands in the invoking user's home owned by root. Left that way the
+    user cannot manage the file crowsnest just made for them, and the next run
+    without sudo cannot write it at all. Best effort: failing to chown is never
+    worth aborting the operation that succeeded.
+    """
+    user = os.environ.get("SUDO_USER")
+    if not user or user == "root" or os.name == "nt":
+        return
+    try:
+        import pwd
+        entry = pwd.getpwnam(user)
+    except (ImportError, KeyError):
+        return
+    for path in paths:
+        try:
+            os.chown(path, entry.pw_uid, entry.pw_gid)
+        except OSError:
+            pass
 
 
 def data_dir() -> str:
@@ -213,10 +241,27 @@ def fetch(dest_dir: str | None = None, months_back: int = 3) -> str:
             with urllib.request.urlopen(request, timeout=180) as response, \
                     open(target + ".gz", "wb") as out:
                 shutil.copyfileobj(response, out)
+            # Bounded rather than copyfileobj: a compressed file says nothing
+            # about how large it becomes, and this one is fetched from the
+            # network. The real database is ~10 MB, so anything approaching the
+            # cap is not the database.
+            written = 0
             with gzip.open(target + ".gz", "rb") as gz, open(target, "wb") as out:
-                shutil.copyfileobj(gz, out)
+                while True:
+                    chunk = gz.read(1 << 20)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > MAX_DB_BYTES:
+                        raise RuntimeError(
+                            f"database is larger than {MAX_DB_BYTES >> 20} MB "
+                            "-- refusing it")
+                    out.write(chunk)
             os.remove(target + ".gz")
             size = os.path.getsize(target) / (1 << 20)
+            # Fetching may well have happened under sudo; the database belongs
+            # to the user whose home it is in.
+            give_back_to_invoker(dest_dir, target)
             print(f"saved {target}  ({size:.1f} MB)")
             print(ATTRIBUTION)
             return target

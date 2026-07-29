@@ -17,6 +17,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import queue
+import re
 import shutil
 import socket
 import subprocess
@@ -39,6 +40,35 @@ FLOW_RETIRE_EVERY = 2000
 
 # Folder scanned for the newest capture when a front end is opened with no file.
 DROP_DIR = os.path.join(os.path.expanduser("~"), "Documents", "Captures")
+
+# The longest a DNS name is allowed to be. Anything longer is not a name, it is
+# someone filling memory a packet at a time.
+MAX_NAME = 253
+
+# Characters that must never survive into a hostname crowsnest will display.
+#
+#   * C0 and C1 controls, which includes ESC. A TLS server name is chosen by
+#     whoever opens the connection, so "evil.com\x1b]0;...\x07" retitles your
+#     window and "evil.com\rgithub.com" prints as "github.com" -- letting a host
+#     impersonate another in the one tool whose job is saying who you talked to.
+#   * Bidirectional overrides and zero-width characters, which reorder or hide
+#     text on screen without changing the string. Same spoofing problem, no
+#     escape sequence required.
+#
+# Stripped once, here, where packet data enters -- rather than at each of the
+# places that print it, where one omission puts it back.
+_UNSAFE_IN_NAME = re.compile(
+    "[\x00-\x1f\x7f-\x9f"          # C0 and C1 control characters
+    "​-‏"                # zero width space .. right-to-left mark
+    "‪-‮"                # bidi embedding and override
+    "⁦-⁩"                # bidi isolates
+    "  ]"                # line and paragraph separators
+)
+
+
+def clean_name(value: str) -> str:
+    """Make a name off the wire safe to print, and bounded."""
+    return _UNSAFE_IN_NAME.sub("", value)[:MAX_NAME]
 
 FIELDS = [
     "ip.src", "ip.dst", "ipv6.src", "ipv6.dst",
@@ -314,7 +344,10 @@ def resolve_many(ips, budget: float = 8.0, workers: int = 16) -> dict[str, str]:
                 except queue.Empty:
                     return
                 try:
-                    name = socket.gethostbyaddr(ip)[0].lower()
+                    # A PTR record is written by whoever controls the reverse
+                    # zone for that address -- which, for a host that contacted
+                    # you, is them. Same untrusted text as a server name.
+                    name = clean_name(socket.gethostbyaddr(ip)[0]).lower()
                 except OSError:
                     name = ""
                 with lock:
@@ -394,7 +427,7 @@ def analyze(capture: str, resolve: bool = True) -> dict:
         ip_hits[dst] += 1
 
         if (da or daaaa) and dqry:
-            qname = dqry.partition(";")[0].lower().rstrip(".")
+            qname = clean_name(dqry.partition(";")[0]).lower().rstrip(".")
             if qname:
                 for answer in _vals(da) + _vals(daaaa):
                     ip_to_name.setdefault(answer, qname)
@@ -416,7 +449,7 @@ def analyze(capture: str, resolve: bool = True) -> dict:
         fl.bytes += nbytes
         if sni or host:
             for name in _vals(sni) + _vals(host):
-                nm = name.lower().rstrip(".")
+                nm = clean_name(name).lower().rstrip(".")
                 if nm and not is_routable_peer(nm.partition(":")[0]):
                     fl.hostnames.add(nm)
         if syn == "1" and ack != "1" and l4 == "tcp":
@@ -681,14 +714,14 @@ class LiveTracker:
         end_a, end_b = (src, sp), (dst, dp)
         key = (l4, end_a, end_b) if end_a <= end_b else (l4, end_b, end_a)
         opening = syn == "1" and ack != "1" and l4 == "tcp"
-        names = [n.lower().rstrip(".") for n in (sni, host) if n]
+        names = [clean_name(n).lower().rstrip(".") for n in (sni, host) if n]
 
         with self._lock:
             self.packets += 1
             self.bytes += nbytes
 
             if (da or daaaa) and dqry:
-                qname = dqry.partition(";")[0].lower().rstrip(".")
+                qname = clean_name(dqry.partition(";")[0]).lower().rstrip(".")
                 if qname:
                     for answer in _vals(da) + _vals(daaaa):
                         self.ip_names.setdefault(answer, qname)

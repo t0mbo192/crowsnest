@@ -286,7 +286,7 @@ being stopped after the first contact.
 | [install.sh](install.sh) / [install.ps1](install.ps1) | Installers for Linux/macOS and Windows, runnable straight from a URL. |
 | [packaging/build-deb.sh](packaging/build-deb.sh) | Builds the Debian package. Takes its file list from `pyproject.toml` so the two cannot drift. |
 | [pyproject.toml](pyproject.toml) | Package metadata, for the `pip`/`pipx` route. |
-| [test_core.py](test_core.py) / [test_blocking.py](test_blocking.py) / [test_gateway.py](test_gateway.py) / [test_dashboard.py](test_dashboard.py) | 101 tests, no network or capture needed. The dashboard ones replay real frames through a small terminal emulator, since a redraw bug is only visible once the escape sequences have been applied to a screen. |
+| [test_core.py](test_core.py) / [test_blocking.py](test_blocking.py) / [test_gateway.py](test_gateway.py)  / [test_dashboard.py](test_dashboard.py) / [test_untrusted.py](test_untrusted.py) | 115 tests, no network or capture needed. The dashboard ones replay real frames through a small terminal emulator, since a redraw bug is only visible once the escape sequences have been applied to a screen. |
 
 Standard library only, apart from the optional `maxminddb`. No display, no web
 server, no daemon.
@@ -347,6 +347,24 @@ builds and runs it before committing, so a tag is the only thing anyone has to
 do. It lives in its own repository because that is what a tap is — Homebrew
 resolves `t0mbo192/tap/crowsnest` by cloning `t0mbo192/homebrew-tap` and reading
 the formulae inside it.
+
+## Names off the wire are not trusted
+
+Every hostname crowsnest shows is chosen by whoever sent the packet. A TLS
+server name and an HTTP Host header are arbitrary strings, and a PTR record is
+written by whoever runs the reverse zone for an address that contacted you. So
+they are stripped of control characters, bidirectional overrides and zero-width
+characters, and capped at the longest a DNS name may be, before anything is
+stored or drawn.
+
+Without that, a host calling itself `evil.com\rgithub.com` prints on your
+terminal as `github.com` — and crowsnest's own description would agree with it,
+because the text matches. Escape sequences in the same place could retitle the
+window or repaint the screen. International domain names pass through untouched;
+only the characters that misrepresent what you are looking at are removed.
+
+`--csv` output gets the same care: a hostname that opens with `=`, `+`, `-` or
+`@` is prefixed so a spreadsheet reads it as text rather than a formula to run.
 
 ## Privacy
 

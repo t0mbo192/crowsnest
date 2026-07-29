@@ -437,21 +437,29 @@ def load_record() -> list[str]:
         return []
 
 
+def _write_record(entries: list[str]) -> None:
+    """Write the record, then hand it back to whoever ran sudo.
+
+    Blocking is always root, and this file lives in the user's home. Without the
+    chown it ends up root-owned in their own directory.
+    """
+    from asn_lookup import give_back_to_invoker
+    os.makedirs(RECORD_DIR, exist_ok=True)
+    with open(RECORD_PATH, "w", encoding="utf-8") as f:
+        json.dump({"blocked": entries}, f, indent=2)
+    give_back_to_invoker(RECORD_DIR, RECORD_PATH)
+
+
 def save_record(addresses: list[str]) -> None:
     """Remember these so `crowsnest blocks --restore` can reapply them."""
     existing = load_record()
-    merged = existing + [a for a in addresses if a not in existing]
-    os.makedirs(RECORD_DIR, exist_ok=True)
-    with open(RECORD_PATH, "w", encoding="utf-8") as f:
-        json.dump({"blocked": merged}, f, indent=2)
+    _write_record(existing + [a for a in addresses if a not in existing])
 
 
 def forget_record(addresses: list[str] | None = None) -> None:
     remaining = [] if addresses is None else \
         [a for a in load_record() if a not in addresses]
-    os.makedirs(RECORD_DIR, exist_ok=True)
-    with open(RECORD_PATH, "w", encoding="utf-8") as f:
-        json.dump({"blocked": remaining}, f, indent=2)
+    _write_record(remaining)
 
 
 def restore_hint() -> str:

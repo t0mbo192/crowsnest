@@ -830,6 +830,21 @@ def host_allowed(row: dict, allow: tuple[set[str], set[str]]) -> bool:
     return any(name == h or name.endswith("." + h) for h in hosts) if name else False
 
 
+# Excel and LibreOffice treat a cell opening with any of these as a formula, not
+# as text, and will offer to run it. Host names come off the wire, so a host that
+# calls itself `=cmd|'/c calc'!A1` turns a report into an attack on whoever opens
+# it. Prefixing an apostrophe is the standard defence: spreadsheets read it as
+# "this is text" and do not show it in the cell.
+_FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_safe(value):
+    """Stop a spreadsheet treating a captured hostname as a formula."""
+    if isinstance(value, str) and value.startswith(_FORMULA_LEAD):
+        return "'" + value
+    return value
+
+
 def write_csv(path: str, rows, allowlisted: bool) -> None:
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
@@ -842,7 +857,7 @@ def write_csv(path: str, rows, allowlisted: bool) -> None:
                     r["packets"], r["bytes"]]
             if allowlisted:
                 line.append("yes" if r.get("allowed") else "NO")
-            w.writerow(line)
+            w.writerow([csv_safe(cell) for cell in line])
 
 
 def newest_capture(folder: str):
