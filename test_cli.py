@@ -11,8 +11,10 @@ looks for all the world like a crash.
 
 from __future__ import annotations
 
+import ctypes
 import io
 import sys
+import types
 import unittest
 from contextlib import contextmanager, redirect_stdout, redirect_stderr
 from unittest import mock
@@ -38,12 +40,21 @@ def run_main(argv, held):
 
 @contextmanager
 def attached(count, frozen):
-    """Pretend Windows reports `count` processes on our console."""
-    windll = mock.Mock()
-    windll.kernel32.GetConsoleProcessList.return_value = count
+    """Pretend Windows reports `count` processes on our console.
+
+    A whole stand-in module goes into sys.modules rather than `mock.patch`ing
+    ctypes.windll, and for a specific reason: mock.patch resolves its target by
+    importing, and with os.name already patched to "nt" that import takes
+    ctypes' Windows branch, which on Linux dies reaching for
+    _ctypes.FormatError. This trap has now caught two CI runs. Substituting the
+    module means no import happens under the patched name at all, on any
+    platform.
+    """
+    stand_in = types.SimpleNamespace(c_uint=ctypes.c_uint, windll=mock.Mock())
+    stand_in.windll.kernel32.GetConsoleProcessList.return_value = count
     with mock.patch("os.name", "nt"), \
          mock.patch.object(sys, "frozen", frozen, create=True), \
-         mock.patch("ctypes.windll", windll, create=True):
+         mock.patch.dict(sys.modules, {"ctypes": stand_in}):
         yield
 
 
