@@ -1208,12 +1208,67 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def owns_the_console() -> bool:
+    """True when this process is the only thing attached to its console.
+
+    Which means Explorer made the window for us -- someone double-clicked
+    crowsnest.exe -- and it closes the instant we return, taking whatever we
+    printed with it. Started from a shell, the shell is attached too, so the
+    count is higher and the window is not ours to hold open.
+    """
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        buffer = (ctypes.c_uint * 4)()
+        attached = ctypes.windll.kernel32.GetConsoleProcessList(buffer, 4)
+        return attached == 1
+    except Exception:                  # no console, or no kernel32 to ask
+        return False
+
+
+def wait_before_closing() -> None:
+    """Keep a double-clicked window open long enough to read."""
+    try:
+        input("\nPress Enter to close this window...")
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+
 def main() -> int:
-    args = build_parser().parse_args()
+    # Double-clicked, the console vanishes when this returns. Everything below
+    # that prints something worth reading pauses first.
+    hold = owns_the_console()
+
+    if hold and len(sys.argv) == 1:
+        # argparse would print two lines of usage and exit(2) here, which is
+        # not much of an introduction for someone who has just double-clicked
+        # an unfamiliar program. Show the whole thing and say what it is.
+        build_parser().print_help()
+        print("\ncrowsnest is a command line tool -- it does not have a window."
+              "\nOpen PowerShell or Terminal and give it one of the commands"
+              "\nabove, for example:\n"
+              "\n    crowsnest interfaces\n"
+              "\nInstalling it puts `crowsnest` on your PATH so you can do that"
+              "\nfrom anywhere:\n"
+              "\n    irm https://raw.githubusercontent.com/t0mbo192/crowsnest"
+              "/main/install.ps1 | iex\n")
+        wait_before_closing()
+        return 0
+
+    try:
+        args = build_parser().parse_args()
+    except SystemExit:                 # --help, --version, or a usage error
+        if hold:
+            wait_before_closing()
+        raise
+
     try:
         return args.func(args)
     except RuntimeError as e:          # tshark missing, or it failed
         print(f"error: {e}", file=sys.stderr)
+        if hold:
+            wait_before_closing()
         return 1
     except KeyboardInterrupt:
         return 130
