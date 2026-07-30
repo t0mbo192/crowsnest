@@ -97,10 +97,10 @@ def a_row(i: int) -> dict:
             "bytes": 2048 * (i + 1), "rate": 700, "packets": 4, "local": False}
 
 
-def mark_fits(cols, lines, facts=25):
+def mark_fits(cols, lines):
     """Would the big mark be chosen at this size, encoding aside?"""
     with mock.patch.object(mark, "encodable", return_value=True):
-        return c.fits_big_banner(cols, lines, facts, unicode_ok=True)
+        return c.fits_big_banner(cols, lines, unicode_ok=True)
 
 
 def sized(cols: int, lines: int):
@@ -189,11 +189,35 @@ class TestWhichMarkIsDrawn(unittest.TestCase):
     clipped frame or a UnicodeEncodeError.
     """
 
-    FACTS = 25          # about what "this machine 192.168.1.10" comes to
-
     def test_needs_the_columns(self):
+        """Room for the mark plus a caption column -- not for the longest fact.
+
+        Demanding the longest fact fit untrimmed made the mark unreachable on a
+        machine with WSL and Hyper-V, whose three local addresses want 43
+        columns of caption when the dashboard never uses more than 120.
+        """
+        self.assertFalse(mark_fits(mark.WIDTH + c.MIN_CAPTION + 2, 40))
+        self.assertTrue(mark_fits(mark.WIDTH + c.MIN_CAPTION + 3, 40))
         self.assertFalse(mark_fits(100, 40))
-        self.assertTrue(mark_fits(mark.WIDTH + self.FACTS + 4, 40))
+
+    def test_a_long_address_list_does_not_hide_the_mark(self):
+        """The case from the field: three local addresses, 120 column terminal."""
+        with sized(120, 30), mock.patch.object(mark, "encodable",
+                                               return_value=True):
+            frame = a_frame(120, 30, 4, packets=48216,
+                            ips="172.27.208.1, 192.168.0.120 +1")
+        drawn = c.ANSI_RE.sub("", "".join(frame))
+        self.assertIn("█", drawn)
+
+    def test_a_trimmed_fact_is_marked_as_trimmed(self):
+        """A cut address must not read as a whole one."""
+        with sized(120, 30), mock.patch.object(mark, "encodable",
+                                               return_value=True):
+            frame = a_frame(120, 30, 4, packets=48216,
+                            ips="172.27.208.1, 192.168.0.120 +1")
+        machine = [c.ANSI_RE.sub("", l) for l in frame if "this machine" in l]
+        self.assertTrue(machine)
+        self.assertTrue(machine[0].rstrip().endswith("…"), machine[0])
 
     def test_needs_the_rows(self):
         """Wide but short is the case that clipped the footer off."""
@@ -203,7 +227,7 @@ class TestWhichMarkIsDrawn(unittest.TestCase):
     def test_falls_back_when_the_output_cannot_carry_it(self):
         """A redirected stdout on Windows encodes with the locale code page."""
         with mock.patch.object(mark, "encodable", return_value=False):
-            self.assertFalse(c.fits_big_banner(200, 60, self.FACTS, True))
+            self.assertFalse(c.fits_big_banner(200, 60, True))
 
     def test_encodable_is_answered_from_the_stream(self):
         """StringIO's encoding attribute is read-only, hence the stand-in."""
@@ -217,7 +241,7 @@ class TestWhichMarkIsDrawn(unittest.TestCase):
 
     def test_falls_back_in_ascii_mode(self):
         with mock.patch.object(mark, "encodable", return_value=True):
-            self.assertFalse(c.fits_big_banner(200, 60, self.FACTS, False))
+            self.assertFalse(c.fits_big_banner(200, 60, False))
 
     def test_the_plain_mark_is_pure_ascii(self):
         """So it cannot be the thing that fails to encode."""
