@@ -85,15 +85,16 @@ package does.
 ## Use
 
 ```bash
-crowsnest interfaces                           # what can I watch?
-sudo crowsnest live -i eth0 --dashboard        # the view in the picture above
-sudo crowsnest live -i eth0                    # or a plain list, one line per host
+sudo crowsnest live --dashboard                # the view in the picture above
+sudo crowsnest live                            # or a plain list, one line per host
 crowsnest read capture.pcapng                  # or read a saved Wireshark capture
+crowsnest interfaces                           # what could I watch?
 ```
 
-Interface names differ by system. `eth0` or `wlan0` on Linux, `en0` for Wi-Fi on
-a Mac, a number from the list on Windows. `crowsnest interfaces` shows you what
-is actually there.
+You do not have to know which network interface to use. `live` lists them, marks
+the one your traffic actually goes through, and asks — press Enter to take it.
+Pass `-i` to skip the question, with either a number from that list or a name
+like `eth0` or `en0`.
 
 Watching live traffic needs privileges: run it with `sudo`, or an administrator
 terminal on Windows. Reading a saved capture needs nothing.

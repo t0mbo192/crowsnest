@@ -410,11 +410,12 @@ printf '\nDone -- crowsnest %s is installed.\n\n' "$VERSION"
 cat <<EOF
   To watch traffic:
 
-    sudo crowsnest live -i $EXAMPLE_IFACE --dashboard
+    sudo crowsnest live --dashboard
 
-  Press q to leave the dashboard. Drop --dashboard for a plain list that
-  prints each host once and then stays quiet. \`crowsnest interfaces\` shows
-  what else you could watch, and marks the one your traffic actually uses.
+  It lists your network interfaces, marks the one your traffic actually
+  uses, and asks which to watch -- press Enter to take the marked one
+  (likely $EXAMPLE_IFACE). Press q to leave the dashboard. Drop --dashboard
+  for a plain list, one line per host.
 
   Reading a saved capture needs no privileges:
 

@@ -111,8 +111,71 @@ class TestDoubleClicked(unittest.TestCase):
 
     def test_a_usage_error_also_waits(self):
         """Otherwise the reason it refused is the thing that flashes past."""
-        result = run_main(["crowsnest", "live"], held=True)   # -i is required
+        # A real usage error. `crowsnest live` with no -i is no longer one:
+        # it asks which interface instead.
+        result = run_main(["crowsnest", "live", "--duration", "soon"], held=True)
         self.assertTrue(result["paused"])
+
+
+FOUND = [
+    {"number": 1, "name": "Local Area Connection* 10", "note": "",
+     "addresses": [], "in_use": False, "device": r"\Device\NPF_A"},
+    {"number": 9, "name": "Ethernet", "note": "",
+     "addresses": ["192.168.0.120"], "in_use": True, "device": r"\Device\NPF_B"},
+]
+
+
+def choose(answers, found=FOUND, a_tty=True):
+    """Run the interface chooser against scripted answers."""
+    out = io.StringIO()
+    with mock.patch.object(c.core, "described_interfaces", return_value=found), \
+         mock.patch.object(sys.stdin, "isatty", return_value=a_tty), \
+         mock.patch.object(c, "input", create=True, side_effect=answers):
+        with redirect_stdout(out):
+            picked = c.choose_interface("tshark", c.Style(False), c.Glyphs(False))
+    return picked, out.getvalue()
+
+
+class TestChoosingAnInterface(unittest.TestCase):
+    """Reading a number off one command and retyping it into another is a step
+    where a dead adapter gets picked and the empty result reads as a crash.
+    """
+
+    def test_the_list_is_shown_before_asking(self):
+        _, shown = choose([""])
+        self.assertIn("Ethernet", shown)
+        self.assertIn("Local Area Connection* 10", shown)
+
+    def test_enter_takes_the_interface_carrying_traffic(self):
+        self.assertEqual(choose([""])[0], "9")
+
+    def test_a_number_is_accepted(self):
+        self.assertEqual(choose(["1"])[0], "1")
+
+    def test_a_name_is_accepted(self):
+        """tshark takes names too, and the list is where the names come from."""
+        self.assertEqual(choose(["Ethernet"])[0], "Ethernet")
+
+    def test_a_number_that_does_not_exist_asks_again(self):
+        picked, shown = choose(["42", "9"])
+        self.assertEqual(picked, "9")
+        self.assertIn("no interface 42", shown)
+
+    def test_giving_up_is_not_a_traceback(self):
+        with self.assertRaises(RuntimeError):
+            choose([KeyboardInterrupt()])
+
+    def test_no_terminal_means_say_what_to_pass(self):
+        """Guessing could quietly watch the wrong interface for hours."""
+        with self.assertRaises(RuntimeError) as caught:
+            choose([""], a_tty=False)
+        self.assertIn("-i 9", str(caught.exception))
+
+    def test_no_default_when_nothing_is_marked(self):
+        plain = [dict(FOUND[0])]
+        picked, shown = choose(["1"], found=plain)
+        self.assertEqual(picked, "1")
+        self.assertNotIn("[", shown.split("Number or name")[-1])
 
 
 class TestStartedFromAShell(unittest.TestCase):
@@ -124,7 +187,9 @@ class TestStartedFromAShell(unittest.TestCase):
         self.assertFalse(result["paused"])
 
     def test_usage_errors_do_not_wait(self):
-        self.assertFalse(run_main(["crowsnest", "live"], held=False)["paused"])
+        self.assertFalse(
+            run_main(["crowsnest", "live", "--duration", "soon"],
+                     held=False)["paused"])
 
     def test_version_does_not_wait(self):
         result = run_main(["crowsnest", "--version"], held=False)

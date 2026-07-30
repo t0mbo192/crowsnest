@@ -603,6 +603,12 @@ def cmd_live(args) -> int:
     screen = Screen(ansi and args.dashboard)
     view = View()
 
+    # Asked for rather than demanded. Picking an interface is the step where a
+    # dead adapter gets chosen and the empty result reads as a broken program,
+    # so the list is put in front of you with the likely answer as the default.
+    if not args.interface:
+        args.interface = choose_interface(tshark, style, glyphs)
+
     my_ips = set(args.me) or core.own_addresses()
     tracker = core.LiveTracker(my_ips)
     events: queue.Queue = queue.Queue()
@@ -869,13 +875,6 @@ def newest_capture(folder: str):
 
 # ------------------------------------------------------------------ plumbing
 def cmd_interfaces(args) -> int:
-    """List what can be watched, and say which one is worth watching.
-
-    The raw `tshark -D` list is close to useless on Windows: eleven devices with
-    GUID names, most of them dead WAN miniports and Hyper-V switches, and nothing
-    to say which carries traffic. Picking the wrong one gives an empty dashboard,
-    which reads as the program being broken.
-    """
     tshark = core.find_tshark()
     style = Style(enable_ansi() and not getattr(args, "no_color", False))
     glyphs = Glyphs(unicode_ok() if getattr(args, "unicode", None) is None
@@ -885,9 +884,29 @@ def cmd_interfaces(args) -> int:
         # Could not parse it, so show what tshark said rather than nothing.
         print(core.list_interfaces(tshark).rstrip())
         return 0
+    show_interfaces(found, style, glyphs)
+    example = next((e for e in found if e["in_use"]), found[0])
+    print(style("\n  Watch one with its number or its name:", Style.DIM))
+    print(style(f"    crowsnest live -i {example['number']} --dashboard",
+                Style.DIM))
+    print(style("\n  Or just `crowsnest live --dashboard` and it will ask.",
+                Style.DIM))
+    return 0
 
+
+def show_interfaces(found: list[dict], style: Style, glyphs: Glyphs) -> None:
+    """Print the numbered list, marking the one that carries traffic.
+
+    The raw `tshark -D` list is close to useless on Windows: eleven devices with
+    GUID names, most of them dead WAN miniports and Hyper-V switches, and nothing
+    to say which carries traffic. Picking the wrong one gives an empty dashboard,
+    which reads as the program being broken.
+
+    Shared with the chooser so the list you pick from and the list `crowsnest
+    interfaces` prints cannot come to differ.
+    """
     width = max(len(entry["name"]) for entry in found)
-    marker = "<--" if not glyphs.unicode else "←"
+    marker = "←" if glyphs.unicode else "<--"
     for entry in found:
         addrs = ", ".join(entry["addresses"]) or entry.get("note", "")
         line = f"  {entry['number']:>2}.  {entry['name']:<{width}}  {addrs:<16}"
@@ -896,8 +915,8 @@ def cmd_interfaces(args) -> int:
                         "goes this way", Style.OUT))
         else:
             print(line.rstrip())
-    knows_addresses = any(entry["addresses"] for entry in found)
-    if knows_addresses and not any(entry["in_use"] for entry in found):
+    if any(entry["addresses"] for entry in found) \
+            and not any(entry["in_use"] for entry in found):
         # Addresses were available and none matched, so say so. Without them
         # there is nothing to report -- an advisory about a comparison that never
         # happened is just noise.
@@ -905,11 +924,53 @@ def cmd_interfaces(args) -> int:
                     "Pick the one you", Style.DIM))
         print(style("  expect to carry traffic -- having an address is a good "
                     "sign.", Style.DIM))
-    print(style(f"\n  Watch one with its number or its name:", Style.DIM))
-    example = next((e for e in found if e["in_use"]), found[0])
-    print(style(f"    crowsnest live -i {example['number']} --dashboard",
-                Style.DIM))
-    return 0
+
+
+def choose_interface(tshark: str, style: Style, glyphs: Glyphs) -> str:
+    """Show the interfaces and ask which one, defaulting to the obvious answer.
+
+    Reading a number off one command and retyping it into another is a step that
+    does not need to exist, and it is the step where picking a dead adapter --
+    and concluding the program is broken -- happens.
+    """
+    found = core.described_interfaces(tshark)
+    if not found:
+        raise RuntimeError(
+            "could not list interfaces; pass one with -i\n\n"
+            + core.list_interfaces(tshark).rstrip())
+
+    print(style("\n  Which interface should I watch?\n", Style.BOLD))
+    show_interfaces(found, style, glyphs)
+
+    default = next((e for e in found if e["in_use"]), None)
+    suffix = f" [{default['number']}]" if default else ""
+    if not sys.stdin.isatty():
+        # Nothing to ask on. Guessing here could quietly watch the wrong thing
+        # for hours, so say what to pass instead. Flushed first, or the list
+        # above arrives after the complaint about it when output is redirected.
+        sys.stdout.flush()
+        raise RuntimeError(
+            "no interface given and nothing to ask on -- pass -i "
+            + (f"{default['number']} (this machine's own)" if default
+               else "with a number from the list above"))
+
+    while True:
+        try:
+            answer = input(f"\n  Number or name{suffix}: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            raise RuntimeError("no interface chosen") from None
+        if not answer and default:
+            return str(default["number"])
+        if answer.isdigit():
+            match = next((e for e in found if e["number"] == int(answer)), None)
+            if match:
+                return answer
+            print(style(f"  There is no interface {answer}.", Style.IN))
+            continue
+        if answer:
+            # A name goes straight through: tshark accepts those too, and the
+            # list above is where the names come from.
+            return answer
 
 
 def cmd_asn(args) -> int:
@@ -1160,8 +1221,8 @@ def build_parser() -> argparse.ArgumentParser:
                        default=None, help="force plain ASCII (autodetected)")
 
     live = sub.add_parser("live", help="watch traffic on an interface as it happens")
-    live.add_argument("-i", "--interface", required=True,
-                      help="interface name or tshark number")
+    live.add_argument("-i", "--interface", default="",
+                      help="interface name or number; asks if you leave it out")
     live.add_argument("--interval", type=float, default=1.0,
                       help="redraw seconds (default 1)")
     live.add_argument("--duration", type=float, default=0,
