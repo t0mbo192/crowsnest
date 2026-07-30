@@ -10,4 +10,4 @@ Kept in its own module so build scripts and the update checker can read it
 without pulling in the rest of crowsnest.
 """
 
-__version__ = "1.1.4"
+__version__ = "1.1.5"

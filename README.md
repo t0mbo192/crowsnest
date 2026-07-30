@@ -45,7 +45,7 @@ brew install t0mbo192/tap/crowsnest
 from [Releases](https://github.com/t0mbo192/crowsnest/releases), then:
 
 ```bash
-sudo apt install ./crowsnest_1.1.4_all.deb
+sudo apt install ./crowsnest_1.1.5_all.deb
 ```
 
 **Windows** — in PowerShell:
