@@ -85,9 +85,10 @@ package does.
 ## Use
 
 ```bash
-crowsnest interfaces               # what can I watch?
-sudo crowsnest live -i eth0        # watch traffic as it happens
-crowsnest read capture.pcapng      # or read a saved Wireshark capture
+crowsnest interfaces                           # what can I watch?
+sudo crowsnest live -i eth0 --dashboard        # the view in the picture above
+sudo crowsnest live -i eth0                    # or a plain list, one line per host
+crowsnest read capture.pcapng                  # or read a saved Wireshark capture
 ```
 
 Interface names differ by system. `eth0` or `wlan0` on Linux, `en0` for Wi-Fi on

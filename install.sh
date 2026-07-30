@@ -404,11 +404,23 @@ printf '\nDone -- crowsnest %s is installed.\n\n' "$VERSION"
 # Name an interface that exists here: Macs have no eth0, and a first command
 # that fails is a poor introduction.
 [ "$PLATFORM" = "macOS" ] && EXAMPLE_IFACE="en0" || EXAMPLE_IFACE="${IFACE:-eth0}"
+# --dashboard is named here because it is the view people install this for --
+# the one in the screenshot. Leaving it out of the only instructions anyone reads
+# meant they had to go and find it.
 cat <<EOF
-  See interfaces      crowsnest interfaces
-  Watch live          sudo crowsnest live -i $EXAMPLE_IFACE
-  Read a capture      crowsnest read capture.pcapng
-  Update              $UPDATE_HINT
-  Uninstall           $REPO_DIR/install.sh --uninstall
+  To watch traffic:
+
+    sudo crowsnest live -i $EXAMPLE_IFACE --dashboard
+
+  Press q to leave the dashboard. Drop --dashboard for a plain list that
+  prints each host once and then stays quiet. \`crowsnest interfaces\` lists
+  what else you could watch.
+
+  Reading a saved capture needs no privileges:
+
+    crowsnest read capture.pcapng
+
+  Update:     $UPDATE_HINT
+  Uninstall:  $REPO_DIR/install.sh --uninstall
 
 EOF
