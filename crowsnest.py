@@ -869,7 +869,46 @@ def newest_capture(folder: str):
 
 # ------------------------------------------------------------------ plumbing
 def cmd_interfaces(args) -> int:
-    print(core.list_interfaces(core.find_tshark()).rstrip())
+    """List what can be watched, and say which one is worth watching.
+
+    The raw `tshark -D` list is close to useless on Windows: eleven devices with
+    GUID names, most of them dead WAN miniports and Hyper-V switches, and nothing
+    to say which carries traffic. Picking the wrong one gives an empty dashboard,
+    which reads as the program being broken.
+    """
+    tshark = core.find_tshark()
+    style = Style(enable_ansi() and not getattr(args, "no_color", False))
+    glyphs = Glyphs(unicode_ok() if getattr(args, "unicode", None) is None
+                    else args.unicode)
+    found = core.described_interfaces(tshark)
+    if not found:
+        # Could not parse it, so show what tshark said rather than nothing.
+        print(core.list_interfaces(tshark).rstrip())
+        return 0
+
+    width = max(len(entry["name"]) for entry in found)
+    marker = "<--" if not glyphs.unicode else "←"
+    for entry in found:
+        addrs = ", ".join(entry["addresses"]) or entry.get("note", "")
+        line = f"  {entry['number']:>2}.  {entry['name']:<{width}}  {addrs:<16}"
+        if entry["in_use"]:
+            print(style(line.rstrip() + f"  {marker} this machine's traffic "
+                        "goes this way", Style.OUT))
+        else:
+            print(line.rstrip())
+    knows_addresses = any(entry["addresses"] for entry in found)
+    if knows_addresses and not any(entry["in_use"] for entry in found):
+        # Addresses were available and none matched, so say so. Without them
+        # there is nothing to report -- an advisory about a comparison that never
+        # happened is just noise.
+        print(style("\n  None of them holds this machine's outbound address. "
+                    "Pick the one you", Style.DIM))
+        print(style("  expect to carry traffic -- having an address is a good "
+                    "sign.", Style.DIM))
+    print(style(f"\n  Watch one with its number or its name:", Style.DIM))
+    example = next((e for e in found if e["in_use"]), found[0])
+    print(style(f"    crowsnest live -i {example['number']} --dashboard",
+                Style.DIM))
     return 0
 
 

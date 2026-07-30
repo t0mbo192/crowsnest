@@ -413,8 +413,8 @@ cat <<EOF
     sudo crowsnest live -i $EXAMPLE_IFACE --dashboard
 
   Press q to leave the dashboard. Drop --dashboard for a plain list that
-  prints each host once and then stays quiet. \`crowsnest interfaces\` lists
-  what else you could watch.
+  prints each host once and then stays quiet. \`crowsnest interfaces\` shows
+  what else you could watch, and marks the one your traffic actually uses.
 
   Reading a saved capture needs no privileges:
 

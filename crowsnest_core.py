@@ -15,6 +15,7 @@ capture began) fall back to whichever end was seen first.
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import queue
 import re
@@ -569,6 +570,118 @@ def list_interfaces(tshark: str) -> str:
     proc = subprocess.run([tshark, "-D"], capture_output=True, text=True,
                           creationflags=_NO_WINDOW)
     return proc.stdout or proc.stderr
+
+
+# "9. \Device\NPF_{CF00CAF1-...} (Ethernet)" -- number, device, friendly name.
+# On Linux there is usually no friendly name and the device is the whole line.
+_IFACE_LINE = re.compile(r"^\s*(\d+)\.\s+(\S+)(?:\s+\((.*)\))?\s*$")
+
+
+def interface_addresses(tshark: str) -> dict[str, list[str]]:
+    """Addresses per capture device, from dumpcap, or {} if it cannot say.
+
+    tshark -D gives numbers and names but no addresses, which on Windows leaves
+    eleven entries called things like "Local Area Connection* 10" and no way to
+    tell which one carries any traffic. dumpcap ships beside tshark and will
+    report addresses as JSON, so it is asked rather than guessed at.
+    """
+    dumpcap = os.path.join(os.path.dirname(tshark),
+                           "dumpcap.exe" if os.name == "nt" else "dumpcap")
+    if not os.path.isfile(dumpcap):
+        found = shutil.which("dumpcap")
+        if not found:
+            return {}
+        dumpcap = found
+    try:
+        proc = subprocess.run([dumpcap, "-M", "-D"], capture_output=True,
+                              text=True, timeout=20, creationflags=_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    return _parse_dumpcap(proc.stdout)
+
+
+def _parse_dumpcap(text: str) -> dict[str, list[str]]:
+    """Addresses per device from `dumpcap -M -D`, in either format it emits.
+
+    Newer Wireshark prints JSON; 4.0 on Raspberry Pi OS prints tab separated
+    fields, with the addresses in the fifth. Both are handled because both are
+    in use -- and the machine most likely to need this is the Pi.
+    """
+    try:
+        entries = json.loads(text)
+    except ValueError:
+        found = {}
+        for line in text.splitlines():
+            parts = line.split("\t")
+            device = parts[0].partition(".")[2].strip()
+            if not device or len(parts) < 5:
+                continue
+            found[device] = [a for a in parts[4].split(",") if a]
+        return found
+
+    found = {}
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        for device, detail in entry.items():
+            if isinstance(detail, dict):
+                found[device] = [a for a in detail.get("addrs") or []
+                                 if isinstance(a, str)]
+    return found
+
+
+def described_interfaces(tshark: str, routed_from: str | None = None) -> list[dict]:
+    """The numbered capture list, with addresses and which one is in use.
+
+    The numbers come from `tshark -D` because those are what `-i N` means;
+    addresses are matched in from dumpcap by device name so the two cannot drift
+    out of step. Exactly one entry is marked in_use at most -- the one holding
+    the address traffic leaves from.
+    """
+    if routed_from is None:
+        routed_from = outbound_address()
+    addresses = interface_addresses(tshark)
+    out = []
+    for line in list_interfaces(tshark).splitlines():
+        match = _IFACE_LINE.match(line)
+        if not match:
+            continue
+        number, device, friendly = match.groups()
+        addrs = addresses.get(device, [])
+        routable = [a for a in addrs if ":" not in a
+                    and not a.startswith(("127.", "169.254."))]
+        # Show whichever of the two is the thing you would type. On Linux that
+        # is the device -- "eth0", not "Loopback". On Windows the device is a
+        # GUID nobody types, and the friendly name works with -i.
+        windows_device = device.startswith("\\Device\\")
+        out.append({"number": int(number), "device": device,
+                    "name": (friendly or device) if windows_device else device,
+                    "note": "" if windows_device or friendly == device
+                            else (friendly or ""),
+                    "addresses": routable,
+                    "in_use": bool(routed_from) and routed_from in addrs})
+    return out
+
+
+def outbound_address() -> str:
+    """The one address this machine's traffic actually leaves from.
+
+    Deliberately narrower than own_addresses(): that returns every address the
+    machine has, and on a box with WSL and Hyper-V that is three or four, so
+    using it to mark "the interface you want" marked the virtual switches too.
+    Only the address the OS picks for a route to the internet answers the
+    question being asked. Nothing is sent; connect() on a datagram socket just
+    makes the kernel choose.
+    """
+    for family, probe in ((socket.AF_INET, ("8.8.8.8", 80)),
+                          (socket.AF_INET6, ("2001:4860:4860::8888", 80))):
+        try:
+            with socket.socket(family, socket.SOCK_DGRAM) as s:
+                s.connect(probe)
+                return s.getsockname()[0].partition("%")[0]
+        except OSError:
+            continue
+    return ""
 
 
 def own_addresses() -> set[str]:

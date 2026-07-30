@@ -199,6 +199,82 @@ class TestAddressClassification(unittest.TestCase):
         self.assertIsNotNone(core.is_private.cache_info().maxsize)
 
 
+class TestInterfaceListing(unittest.TestCase):
+    """Which interface to watch is the question the raw list cannot answer.
+
+    On Windows `tshark -D` gives eleven devices with GUID names, most of them
+    dead WAN miniports and Hyper-V switches. Picking one of those gives an empty
+    dashboard, which reads as the program being broken.
+    """
+
+    # Wireshark 4.6 and later.
+    JSON_FORM = (
+        '[{"\\\\Device\\\\NPF_{AAA}":{"friendly_name":"Local Area Connection* 10",'
+        '"addrs":[],"loopback":false}},'
+        '{"\\\\Device\\\\NPF_{BBB}":{"friendly_name":"Ethernet",'
+        '"addrs":["192.168.0.120","fe80::1"],"loopback":false}}]')
+
+    # Wireshark 4.0, which is what Raspberry Pi OS bookworm ships.
+    TSV_FORM = (
+        "1. eth0\t\t\t0\t192.168.0.50,fe80::87eb\tnetwork\t\n"
+        "2. any\t\t\t0\t\tnetwork\t\n"
+        "3. lo\t\tLoopback\t0\t127.0.0.1,::1\tloopback\t\n")
+
+    def test_reads_the_json_form(self):
+        found = core._parse_dumpcap(self.JSON_FORM)
+        self.assertEqual(found["\\Device\\NPF_{BBB}"],
+                         ["192.168.0.120", "fe80::1"])
+        self.assertEqual(found["\\Device\\NPF_{AAA}"], [])
+
+    def test_reads_the_tab_separated_form(self):
+        """The Pi's Wireshark predates the JSON output, and the Pi matters most."""
+        found = core._parse_dumpcap(self.TSV_FORM)
+        self.assertEqual(found["eth0"], ["192.168.0.50", "fe80::87eb"])
+        self.assertEqual(found["lo"], ["127.0.0.1", "::1"])
+        self.assertEqual(found["any"], [])
+
+    def test_garbage_is_not_an_error(self):
+        self.assertEqual(core._parse_dumpcap("not machine readable at all"), {})
+
+    def test_only_the_routed_interface_is_marked(self):
+        """A box with WSL and Hyper-V has several addresses; one carries traffic.
+
+        Marking every interface holding a local address marked the virtual
+        switches too, which is no more use than marking none of them.
+        """
+        listing = ("1. \\Device\\NPF_{AAA} (vEthernet (WSL))\n"
+                   "2. \\Device\\NPF_{BBB} (Ethernet)\n")
+        addresses = {"\\Device\\NPF_{AAA}": ["192.168.160.1"],
+                     "\\Device\\NPF_{BBB}": ["192.168.0.120"]}
+        with mock.patch.object(core, "list_interfaces", return_value=listing), \
+             mock.patch.object(core, "interface_addresses", return_value=addresses):
+            found = core.described_interfaces("tshark", routed_from="192.168.0.120")
+        marked = [e["name"] for e in found if e["in_use"]]
+        self.assertEqual(marked, ["Ethernet"])
+
+    def test_numbers_come_from_tshark_not_dumpcap(self):
+        """`-i N` means tshark's numbering, and dumpcap omits extcap devices."""
+        listing = "7. eth0\n9. wlan0\n"
+        with mock.patch.object(core, "list_interfaces", return_value=listing), \
+             mock.patch.object(core, "interface_addresses", return_value={}):
+            found = core.described_interfaces("tshark", routed_from="")
+        self.assertEqual([e["number"] for e in found], [7, 9])
+
+    def test_the_name_shown_is_the_one_you_would_type(self):
+        listing = ("1. eth0\n"
+                   "2. lo (Loopback)\n"
+                   "3. \\Device\\NPF_{CCC} (Wi-Fi)\n")
+        with mock.patch.object(core, "list_interfaces", return_value=listing), \
+             mock.patch.object(core, "interface_addresses", return_value={}):
+            found = core.described_interfaces("tshark", routed_from="")
+        # The device on Linux, the friendly name on Windows where it is a GUID.
+        self.assertEqual([e["name"] for e in found], ["eth0", "lo", "Wi-Fi"])
+
+    def test_outbound_address_is_a_single_address(self):
+        found = core.outbound_address()
+        self.assertNotIn(",", found)
+
+
 class TestFindTshark(unittest.TestCase):
     """Wireshark installs off PATH on both desktop platforms."""
 
