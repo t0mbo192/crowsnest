@@ -150,14 +150,43 @@ def logo_lines(unicode_safe: bool, style: Style) -> list[str]:
 
 
 def banner_lines(style: Style) -> list[str]:
-    """The wide mark that spells the name, nest picked out from the lettering.
+    """The plain mark that spells the name, nest picked out from the lettering.
 
     Drawn in plain ASCII, so unlike the small mark it needs no fallback -- it
     comes out the same on a legacy Windows console as on a modern terminal.
     """
     return [style(line[:mark.MARK_COLS], Style.OUT) +
             style(line[mark.MARK_COLS:], Style.BOLD)
-            for line in mark.BANNER.split("\n")]
+            for line in mark.ASCII_LINES]
+
+
+def big_banner_lines(style: Style) -> list[str]:
+    """The large mark. Tinted as one piece -- it has no mast to pick out."""
+    return [style(line, Style.OUT) for line in mark.BIG_LINES]
+
+
+# Rows the frame needs underneath the mark: the column labels and a blank, two
+# box borders and a title each, the footer, and enough host rows to be worth
+# drawing. Below this the big mark is not worth its height.
+ROWS_BESIDES_MARK = 18
+
+
+def fits_big_banner(width: int, height: int, facts_width: int,
+                    unicode_ok: bool) -> bool:
+    """Whether the large mark can be drawn here without spoiling the frame.
+
+    Three separate ways it cannot be, all of them real:
+
+      * not enough columns -- the facts beside it would run off the edge;
+      * not enough rows -- the frame would be taller than the screen, and
+        Screen.draw would clip the footer off the bottom;
+      * an output encoding that cannot carry it, which is a crash rather than
+        an ugly frame.
+    """
+    return (unicode_ok
+            and mark.encodable(mark.BANNER)
+            and width >= mark.WIDTH + facts_width + 4
+            and height >= mark.HEIGHT + ROWS_BESIDES_MARK)
 
 
 # How many hosts each panel shows before you ask for more.
@@ -449,7 +478,11 @@ def render_dashboard(rows: list[dict], meta: dict, glyphs: Glyphs, style: Style,
     # it. It wants 45 columns though, and on a narrow terminal the facts beside
     # it would run off the edge -- there the small mark and a written name are
     # used instead.
-    if width >= mark.WIDTH + max(len(f) for f in facts) + 4:
+    facts_width = max(len(f) for f in facts)
+    if fits_big_banner(width, height, facts_width, glyphs.unicode):
+        art = big_banner_lines(style)
+        captions = [style(f"v{__version__}   network lookout", Style.DIM)]
+    elif width >= mark.ASCII_WIDTH + facts_width + 4:
         art = banner_lines(style)
         captions = [style(f"v{__version__}   network lookout", Style.DIM)]
     else:

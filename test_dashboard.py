@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import io
 import re
+import types
 import unittest
 from contextlib import redirect_stdout
 from unittest import mock
 
 import crowsnest as c
+import crowsnest_banner as mark
 
 SGR = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -93,6 +95,12 @@ def a_row(i: int) -> dict:
             "site": f"host{i}.example.net", "description": "Website / service",
             "ip": f"203.0.113.{i}", "name": f"host{i}.example.net",
             "bytes": 2048 * (i + 1), "rate": 700, "packets": 4, "local": False}
+
+
+def mark_fits(cols, lines, facts=25):
+    """Would the big mark be chosen at this size, encoding aside?"""
+    with mock.patch.object(mark, "encodable", return_value=True):
+        return c.fits_big_banner(cols, lines, facts, unicode_ok=True)
 
 
 def sized(cols: int, lines: int):
@@ -170,6 +178,66 @@ class TestFrameFitsTheTerminal(unittest.TestCase):
         self.assertTrue(keys)
         self.assertLessEqual(c.visible_len(keys[0]), 40)
         self.assertNotIn("quit", c.ANSI_RE.sub("", keys[0]))
+
+
+class TestWhichMarkIsDrawn(unittest.TestCase):
+    """The big mark is only usable where it genuinely fits, and can be printed.
+
+    It is 80 columns and 10 rows against the plain one's 45 and 4, and it is
+    drawn with block characters that do not exist in cp1252. Each of those is a
+    separate reason to fall back, and getting any of them wrong is either a
+    clipped frame or a UnicodeEncodeError.
+    """
+
+    FACTS = 25          # about what "this machine 192.168.1.10" comes to
+
+    def test_needs_the_columns(self):
+        self.assertFalse(mark_fits(100, 40))
+        self.assertTrue(mark_fits(mark.WIDTH + self.FACTS + 4, 40))
+
+    def test_needs_the_rows(self):
+        """Wide but short is the case that clipped the footer off."""
+        self.assertFalse(mark_fits(160, 24))
+        self.assertTrue(mark_fits(160, mark.HEIGHT + c.ROWS_BESIDES_MARK))
+
+    def test_falls_back_when_the_output_cannot_carry_it(self):
+        """A redirected stdout on Windows encodes with the locale code page."""
+        with mock.patch.object(mark, "encodable", return_value=False):
+            self.assertFalse(c.fits_big_banner(200, 60, self.FACTS, True))
+
+    def test_encodable_is_answered_from_the_stream(self):
+        """StringIO's encoding attribute is read-only, hence the stand-in."""
+        legacy = types.SimpleNamespace(encoding="cp1252")
+        self.assertFalse(mark.encodable(mark.BANNER, legacy))
+        self.assertTrue(mark.encodable(mark.BANNER_ASCII, legacy))
+
+    def test_an_unknown_encoding_is_not_a_crash(self):
+        self.assertFalse(
+            mark.encodable(mark.BANNER, types.SimpleNamespace(encoding="nonsense")))
+
+    def test_falls_back_in_ascii_mode(self):
+        with mock.patch.object(mark, "encodable", return_value=True):
+            self.assertFalse(c.fits_big_banner(200, 60, self.FACTS, False))
+
+    def test_the_plain_mark_is_pure_ascii(self):
+        """So it cannot be the thing that fails to encode."""
+        self.assertTrue(mark.BANNER_ASCII.isascii())
+
+    def test_no_blank_rows_are_carried_into_the_frame(self):
+        """A triple-quoted string hands you a blank first and last line."""
+        self.assertTrue(mark.BIG_LINES[0].strip())
+        self.assertTrue(mark.BIG_LINES[-1].strip())
+
+    def test_the_frame_still_fits_wherever_the_big_mark_is_chosen(self):
+        for cols, lines in ((109, 28), (120, 28), (120, 30), (160, 40),
+                            (200, 60), (120, 24), (100, 40), (80, 24)):
+            with self.subTest(size=f"{cols}x{lines}"):
+                with sized(cols, lines), \
+                     mock.patch.object(mark, "encodable", return_value=True):
+                    frame = a_frame(cols, lines, 12)
+                self.assertLessEqual(len(frame), max(4, lines - 1))
+                for line in frame:
+                    self.assertLessEqual(c.visible_len(line), cols)
 
 
 class TestRedraw(unittest.TestCase):
