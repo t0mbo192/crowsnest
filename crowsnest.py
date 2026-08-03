@@ -397,15 +397,40 @@ def panel_widths(width: int) -> tuple[int, int, int, int]:
     return site_w, desc_w, data_w, rate_w
 
 
+def fit_label(options: tuple[str, ...], room: int) -> str:
+    """The most descriptive label that fits, or the shortest one cut to size.
+
+    A label wider than its column pushes the whole header line out past the
+    terminal, so the choice has to be made against the room actually available
+    rather than assumed.
+    """
+    for label in options:
+        if len(label) <= room:
+            return label
+    return options[-1][:room]
+
+
 def column_labels(width: int, style: Style) -> str:
     """Names for the columns, once, above both panels.
 
     The two leading spaces stand in for the panel's left border and the space
     after it, so a label sits directly over its column.
+
+    Each name says what the column means rather than naming the field: the
+    middle one holds an organisation or a service, so it is who *or* what; the
+    last two are a running total and a current speed, which "DATA" and "RATE"
+    left you to work out.
     """
     site_w, desc_w, data_w, rate_w = panel_widths(width)
-    return style(f"  {'SITE / HOST':<{site_w}} {'WHAT IT IS':<{desc_w}} "
-                 f"{'DATA':>{data_w}} {'RATE':>{rate_w}}", Style.DIM)
+    site = fit_label(("SITE / HOST", "HOST"), site_w)
+    desc = fit_label(("WHO/WHAT IT IS", "WHO/WHAT"), desc_w)
+    data = fit_label(("DATA SEEN", "DATA"), data_w)
+    rate = fit_label(("PER SECOND", "RATE"), rate_w)
+    line = (f"  {site:<{site_w}} {desc:<{desc_w}} "
+            f"{data:>{data_w}} {rate:>{rate_w}}")
+    # Trimmed as a whole too: on a narrow terminal the columns themselves add up
+    # to more than the screen, which no per-label choice can fix.
+    return style(visible_trim(line, width), Style.DIM)
 
 
 def panel_rows(rows: list[dict], width: int, limit: int, style: Style,

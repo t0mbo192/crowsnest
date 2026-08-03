@@ -172,6 +172,45 @@ class TestFrameFitsTheTerminal(unittest.TestCase):
         self.assertNotIn("quit", c.ANSI_RE.sub("", keys[0]))
 
 
+class TestColumnLabels(unittest.TestCase):
+    """The heading has to say what the column means and still fit the screen."""
+
+    def labels(self, width):
+        return c.ANSI_RE.sub("", c.column_labels(width, c.Style(False)))
+
+    def test_they_say_what_the_columns_hold(self):
+        text = self.labels(100)
+        self.assertIn("WHO/WHAT IT IS", text)   # an organisation or a service
+        self.assertIn("DATA SEEN", text)        # a running total
+        self.assertIn("PER SECOND", text)       # a current speed
+
+    def test_never_wider_than_the_terminal(self):
+        """This line sits outside the box, so nothing else trims it."""
+        for width in range(36, 131, 2):
+            with self.subTest(width=width):
+                self.assertLessEqual(len(self.labels(width)), width)
+
+    def test_a_narrow_screen_shortens_rather_than_chops_mid_word(self):
+        text = self.labels(50)
+        self.assertIn("WHO/WHAT", text)
+        self.assertNotIn("WHO/WHAT IT", text)
+
+    def test_headings_sit_over_their_columns(self):
+        """Shared widths are the mechanism; this checks the result."""
+        with sized(100, 30):
+            frame = a_frame(100, 30, 4)
+        heading = next(l for l in frame if "SITE / HOST" in c.ANSI_RE.sub("", l))
+        row = next(l for l in frame if "host0.example.net" in c.ANSI_RE.sub("", l))
+        heading, row = c.ANSI_RE.sub("", heading), c.ANSI_RE.sub("", row)
+        # The row carries a box border and a space where the heading has two
+        # spaces, so the columns beneath line up at the same offsets.
+        self.assertEqual(heading.index("WHO/WHAT IT IS"),
+                         row.index("Website / service"))
+        # And the right edge of the last column lines up: strip the row's
+        # closing border and the padding the box added after the rate.
+        self.assertEqual(len(heading.rstrip()), len(row.rstrip("│").rstrip()))
+
+
 class TestRedraw(unittest.TestCase):
     """What is on screen after successive frames, not what was rendered."""
 
