@@ -1204,8 +1204,20 @@ def cmd_update(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # The examples come before the command list, because "how do I start it"
+    # is the question someone runs -h to answer, and a list of eight
+    # subcommands does not answer it. The dashboard is the view in the
+    # screenshot and the reason most people are here, so it goes first.
     ap = argparse.ArgumentParser(
-        prog="crowsnest", description=__doc__.strip().split("\n\n")[1],
+        prog="crowsnest", description=__doc__.strip().split("\n\n")[1] + """
+
+To watch traffic right now:
+
+  crowsnest live --dashboard     the full-screen view, updating as it goes
+  crowsnest live                 or a quiet list, one line per host
+
+Either one lists your network interfaces and asks which to watch.
+Press q to leave the dashboard, Ctrl-C to stop the quiet list.""",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Run `crowsnest <command> -h` for a command's own options.")
     ap.add_argument("--version", action="version", version=f"crowsnest {__version__}")
@@ -1220,7 +1232,21 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--ascii", dest="unicode", action="store_false",
                        default=None, help="force plain ASCII (autodetected)")
 
-    live = sub.add_parser("live", help="watch traffic on an interface as it happens")
+    live = sub.add_parser(
+        "live", help="watch traffic as it happens (--dashboard for the full view)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""Watch traffic on an interface as it happens.
+
+  crowsnest live --dashboard     the full-screen view: a framed table of
+                                 hosts with transfer rates, redrawn as
+                                 traffic arrives. Press q to leave it.
+
+  crowsnest live                 the quiet view: one line per host, printed
+                                 the first time it appears and never again.
+                                 Ctrl-C stops it and prints a summary.
+
+With no -i, it lists your network interfaces, marks the one your traffic
+actually goes through, and asks which to watch.""")
     live.add_argument("-i", "--interface", default="",
                       help="interface name or number; asks if you leave it out")
     live.add_argument("--interval", type=float, default=1.0,
@@ -1232,8 +1258,8 @@ def build_parser() -> argparse.ArgumentParser:
     live.add_argument("--me", action="append", default=[], metavar="IP",
                       help="treat IP as this machine (repeatable)")
     live.add_argument("--dashboard", action="store_true",
-                      help="show a continuously redrawn table with rates, "
-                           "instead of reporting each host once")
+                      help="the full-screen view -- a live table of hosts with "
+                           "transfer rates. Press q to leave it")
     shared(live)
     live.set_defaults(func=cmd_live)
 

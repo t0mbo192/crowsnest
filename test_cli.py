@@ -11,6 +11,7 @@ looks for all the world like a crash.
 
 from __future__ import annotations
 
+import argparse
 import ctypes
 import io
 import sys
@@ -176,6 +177,51 @@ class TestChoosingAnInterface(unittest.TestCase):
         picked, shown = choose(["1"], found=plain)
         self.assertEqual(picked, "1")
         self.assertNotIn("[", shown.split("Number or name")[-1])
+
+
+class TestHelpSaysHowToStart(unittest.TestCase):
+    """`-h` is where someone looks to find out how to run the thing.
+
+    It listed eight subcommands and never used the word "dashboard", so the
+    view in the screenshot -- the reason most people install this -- was
+    undiscoverable from the help.
+    """
+
+    def help_for(self, *argv):
+        out = io.StringIO()
+        parser = c.build_parser()
+        with redirect_stdout(out):
+            if argv:
+                # Reach the subparser the way argparse stores it.
+                actions = [a for a in parser._actions
+                           if isinstance(a, argparse.
+                                         _SubParsersAction)][0]
+                actions.choices[argv[0]].print_help()
+            else:
+                parser.print_help()
+        return out.getvalue()
+
+    def test_top_level_help_shows_how_to_open_the_dashboard(self):
+        text = self.help_for()
+        self.assertIn("--dashboard", text)
+        self.assertIn("crowsnest live --dashboard", text)
+
+    def test_top_level_help_says_how_to_leave_it(self):
+        """A full-screen view you cannot get out of is its own problem."""
+        self.assertIn("q to leave", self.help_for())
+
+    def test_live_help_leads_with_the_two_views(self):
+        text = self.help_for("live")
+        self.assertIn("crowsnest live --dashboard", text)
+        self.assertIn("full-screen", text)
+
+    def test_live_help_explains_the_interface_question(self):
+        self.assertIn("asks which to watch", self.help_for("live"))
+
+    def test_the_subcommand_summary_mentions_the_dashboard(self):
+        """The one line beside `live` in the command list is often all that
+        gets read."""
+        self.assertIn("--dashboard", self.help_for())
 
 
 class TestStartedFromAShell(unittest.TestCase):
