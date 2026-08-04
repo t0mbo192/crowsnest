@@ -33,9 +33,9 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -81,9 +81,9 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -110,7 +110,7 @@ jobs:
           test ! -e /usr/share/crowsnest
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: crowsnest-deb
           path: dist/*.deb
@@ -122,9 +122,9 @@ jobs:
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -180,13 +180,13 @@ jobs:
       # Built on Linux by the package job above; collected here so one release
       # carries all three.
       - name: Fetch the Debian package
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: crowsnest-deb
           path: dist
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: crowsnest-${{ steps.version.outputs.file }}
           path: |
